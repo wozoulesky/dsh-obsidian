@@ -36,12 +36,18 @@ export class MuxStream {
 
   start(): void {
     this.stopped = false;
+    this.lastState = null;
+    this.attempt = 0;
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
     this.connect();
   }
 
   private connect(): void {
     this.emitState("reconnecting");
-    const url = this.baseUrl.replace(/^http/, "ws") + "/api/events.mux";
+    const url = this.baseUrl.replace(/\/+$/, "").replace(/^http/, "ws") + "/api/events.mux";
     const socket = new WebSocket(url, { handshakeTimeout: 5000 });
     this.socket = socket;
     socket.on("open", () => {
@@ -49,11 +55,21 @@ export class MuxStream {
       this.emitState("connected");
     });
     socket.on("message", (data) => {
+      let msg: ServerRequest;
       try {
-        const msg = JSON.parse(data.toString()) as ServerRequest;
-        this.sink.onFrame(msg.rpcId, msg.payload as MuxFrame);
+        msg = JSON.parse(data.toString()) as ServerRequest;
       } catch (err) {
         console.error("[dsh-obsidian] 丢弃非法 mux 帧:", err);
+        return;
+      }
+      if (typeof msg?.rpcId !== "string" || typeof msg?.payload !== "object" || msg?.payload === null) {
+        console.error("[dsh-obsidian] 丢弃结构非法的 mux 帧:", JSON.stringify(msg));
+        return;
+      }
+      try {
+        this.sink.onFrame(msg.rpcId, msg.payload as MuxFrame);
+      } catch (err) {
+        console.error("[dsh-obsidian] mux 帧处理回调异常（帧已丢弃，流继续）:", err);
       }
     });
     socket.on("close", () => this.scheduleReconnect());
@@ -64,6 +80,7 @@ export class MuxStream {
 
   private scheduleReconnect(): void {
     if (this.stopped) return;
+    this.emitState("reconnecting");
     this.attempt += 1;
     const delay = Math.min(this.backoffMaxMs, this.backoffBaseMs * 2 ** (this.attempt - 1));
     this.timer = setTimeout(() => {
@@ -80,7 +97,10 @@ export class MuxStream {
 
   stop(): void {
     this.stopped = true;
-    if (this.timer) clearTimeout(this.timer);
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
     this.socket?.close();
     this.socket = null;
   }
