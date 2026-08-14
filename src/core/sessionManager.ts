@@ -83,6 +83,20 @@ export class SessionManager {
     this.currentId = sessionId;
   }
 
+  /** 重连后重新拉取尾页历史并重建视图（用于 current 会话与内联编辑会话）。 */
+  async resyncSession(sessionId: string): Promise<void> {
+    this.openEpoch += 1; // 使进行中的 openSession 失效，避免交错覆盖
+    const res = await this.client.history({ sessionId, maxMessages: this.deps.settings.values.historyPageSize });
+    if (!res.ok) return; // 服务端暂不可用时静默放弃，下一次重连会重试
+    this.deps.store.dropView(sessionId);
+    this.deps.store.seedHistory(sessionId, res.value.events);
+    if (res.value.projections) {
+      for (const [key, value] of Object.entries(res.value.projections.values)) {
+        this.deps.store.applyProjection(sessionId, key, value, res.value.projections.asOfSeq);
+      }
+    }
+  }
+
   /** 加载更早一页；返回是否还有更早内容。 */
   async loadOlder(sessionId: string): Promise<boolean> {
     const view = this.deps.store.ensureView(sessionId);

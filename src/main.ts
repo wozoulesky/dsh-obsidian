@@ -56,6 +56,17 @@ export default class DshPlugin extends Plugin {
       onState: (state) => {
         runtime.muxState = state;
         this.statusBarEl.setText(state === "connected" ? "DSH 已连接" : "DSH 重连中…");
+        if (state === "connected") {
+          void (async () => {
+            const targets = new Set<string>();
+            if (manager.currentId) targets.add(manager.currentId);
+            const inlineId = this.settings.values.inlineEditSessionId;
+            if (inlineId && store.getView(inlineId)) targets.add(inlineId);
+            for (const id of targets) {
+              manager.resyncSession(id).catch((err) => console.error("[dsh-obsidian] 重连同步失败:", err));
+            }
+          })();
+        }
       },
     });
     runtime.mux = mux;

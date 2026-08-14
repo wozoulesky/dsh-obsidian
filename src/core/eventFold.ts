@@ -54,11 +54,13 @@ export interface SessionView {
   lastSeq: number;
   /** 已折叠事件的最小 seq（-1 表示尚无事件）；翻页边界以此为准，避免与历史页重叠。 */
   firstSeq: number;
+  /** 最近一次 turn/end 的 seq（-1 表示尚未结束过回合）。 */
+  lastTurnEndSeq: number;
   running: boolean;
 }
 
 export function createSessionView(sessionId: string): SessionView {
-  return { sessionId, nodes: [], title: null, plan: { active: false, pending: false }, queueItems: [], lastSeq: -1, firstSeq: -1, running: false };
+  return { sessionId, nodes: [], title: null, plan: { active: false, pending: false }, queueItems: [], lastSeq: -1, firstSeq: -1, lastTurnEndSeq: -1, running: false };
 }
 
 /** 从内容块提取可见文本（text 块以空行连接）。 */
@@ -124,6 +126,7 @@ export function foldEvent(view: SessionView, event: SessionEvent): void {
       break;
     case "turn/end": {
       view.running = false;
+      view.lastTurnEndSeq = event.seq;
       const reason = data.reason as { kind?: string; error?: { message?: string; code?: string } };
       if (reason?.kind === "error") {
         view.nodes.push({ kind: "error", id: `err-${event.seq}`, text: `回合错误：${reason.error?.message ?? "未知错误"}`, seq: event.seq });

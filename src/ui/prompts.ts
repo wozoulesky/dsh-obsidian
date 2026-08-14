@@ -11,7 +11,13 @@ export const BUILTIN_COMMANDS: BuiltinCommand[] = [
   { name: "/goal", description: "管理长期目标（/goal create <目标>）" },
 ];
 
-const MENTION_RE = /@file:([^\s@]+)/g;
+const MENTION_RE = /@(?:file|folder):([^\s@]+)/g;
+
+/** 提及来源的解析结果：file 为文件内容，folder 为目录树文本。 */
+export interface MentionSource {
+  kind: "file" | "folder";
+  text: string;
+}
 
 export function collectMentionPaths(text: string): string[] {
   const out: string[] = [];
@@ -24,19 +30,20 @@ export function truncate(text: string, max: number): string {
   return text.slice(0, max) + "…";
 }
 
-/** 把 @file:路径 标记替换为文件内容引用（长内容截断；缺失文件给出说明）。 */
+/** 把 @file:路径 / @folder:路径 标记替换为内容引用（长内容截断；缺失给出说明）。 */
 export async function resolveMentions(
   text: string,
-  read: (path: string) => Promise<string | null>,
+  read: (path: string) => Promise<MentionSource | null>,
   maxChars: number
 ): Promise<string> {
   let out = text;
   for (const path of collectMentionPaths(text)) {
-    const content = await read(path);
-    const replacement = content === null
-      ? `（找不到文件 ${path}，请检查路径）`
-      : `文件 ${path}：\n> ${truncate(content, maxChars).replace(/\n/g, "\n> ")}`;
+    const source = await read(path);
+    const replacement = source === null
+      ? `（找不到 ${path}，请检查路径）`
+      : `${source.kind === "file" ? "文件" : "目录"} ${path}：\n> ${truncate(source.text, maxChars).replace(/\n/g, "\n> ")}`;
     out = out.replace(`@file:${path}`, replacement);
+    out = out.replace(`@folder:${path}`, replacement);
   }
   return out;
 }

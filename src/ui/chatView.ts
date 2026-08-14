@@ -1,10 +1,10 @@
-import { App, ItemView, MarkdownRenderer, Modal, Notice, Setting, WorkspaceLeaf } from "obsidian";
+import { App, ItemView, MarkdownRenderer, Modal, Notice, Setting, TFolder, WorkspaceLeaf } from "obsidian";
 import { DshInputBox } from "./inputBox";
 import { resolveMentions, truncate } from "./prompts";
 import type { DshRuntime } from "../main";
 import type { SessionView, ViewNode } from "../core/eventFold";
 import type { PendingApproval, PendingQuestion } from "../core/approvalCenter";
-import type { AskUserQuestionAnswerItem } from "../transport/types";
+import type { AskUserQuestionAnswerItem, RpcReceipt } from "../transport/types";
 
 export const VIEW_TYPE_DSH_CHAT = "dsh-chat";
 
@@ -59,7 +59,11 @@ export class DshChatView extends ItemView {
       })
     );
 
-    await this.runtime.manager.refresh();
+    try {
+      await this.runtime.manager.refresh();
+    } catch (err) {
+      new Notice(`会话列表拉取失败：${err instanceof Error ? err.message : String(err)}`);
+    }
     this.renderHeader();
     if (this.runtime.manager.sessions.length > 0 && !this.runtime.manager.currentId) {
       const first = this.runtime.manager.sessions[0];
@@ -98,15 +102,37 @@ export class DshChatView extends ItemView {
       if (!res.ok) new Notice(`发送失败：${res.error.message}`);
     } catch (err) {
       new Notice(`发送失败：${err instanceof Error ? err.message : String(err)}`);
+      const view = this.view;
+      if (view && view.plan.pending) {
+        view.plan.pending = false;
+        this.renderNow();
+      }
     }
   }
 
-  private async readVaultFile(path: string): Promise<string | null> {
+  private async readVaultFile(path: string): Promise<{ kind: "file" | "folder"; text: string } | null> {
+    const abs = this.runtime.plugin.app.vault.getAbstractFileByPath(path);
+    if (!abs) return null;
+    if (abs instanceof TFolder) {
+      return { kind: "folder", text: (await this.listTree(path, 0)).join("\n") };
+    }
     try {
-      return await this.runtime.plugin.app.vault.adapter.read(path);
+      return { kind: "file", text: await this.runtime.plugin.app.vault.adapter.read(path) };
     } catch {
       return null;
     }
+  }
+
+  /** 递归列出目录树（相对路径），深度限制 2 层。 */
+  private async listTree(dir: string, depth: number): Promise<string[]> {
+    const list = await this.runtime.plugin.app.vault.adapter.list(dir);
+    const out: string[] = [];
+    for (const f of list.files) out.push(f);
+    for (const d of list.folders) {
+      out.push(`${d}/`);
+      if (depth < 2) out.push(...(await this.listTree(d, depth + 1)));
+    }
+    return out;
   }
 
   private renderHeader(): void {
@@ -235,7 +261,7 @@ export class ApprovalModal extends Modal {
   constructor(
     app: App,
     private p: PendingApproval,
-    private center: { decideApproval(p: PendingApproval, outcome: "allowed-once" | "rejected"): Promise<unknown> },
+    private center: { decideApproval(p: PendingApproval, outcome: "allowed-once" | "rejected"): Promise<RpcReceipt> },
     private onCloseCb: () => void
   ) {
     super(app);
@@ -251,11 +277,21 @@ export class ApprovalModal extends Modal {
 
   private async decide(outcome: "allowed-once" | "rejected"): Promise<void> {
     try {
-      await this.center.decideApproval(this.p, outcome);
+      const receipt = await this.center.decideApproval(this.p, outcome);
+      if (receipt.accepted) {
+        this.close();
+        return;
+      }
+      if (receipt.accepted === false && receipt.reason === "not-pending") {
+        new Notice("该审批已在别处处理");
+        this.close();
+        return;
+      }
+      new Notice("应答未被接受，请重试"); // bad-response：保留弹窗供重试
     } catch (err) {
-      new Notice(`审批应答失败：${err instanceof Error ? err.message : String(err)}`);
+      new Notice(`审批应答失败，请重试：${err instanceof Error ? err.message : String(err)}`);
+      // 不关闭：按钮可再次点击重试
     }
-    this.close(); // 无论应答成败都关闭弹窗，避免出现"死"按钮
   }
 
   onClose(): void {
@@ -269,7 +305,7 @@ export class QuestionModal extends Modal {
   constructor(
     app: App,
     private p: PendingQuestion,
-    private center: { answerQuestion(p: PendingQuestion, answers: AskUserQuestionAnswerItem[]): Promise<unknown> },
+    private center: { answerQuestion(p: PendingQuestion, answers: AskUserQuestionAnswerItem[]): Promise<RpcReceipt> },
     private onCloseCb: () => void
   ) {
     super(app);
@@ -312,11 +348,21 @@ export class QuestionModal extends Modal {
 
   private async submit(): Promise<void> {
     try {
-      await this.center.answerQuestion(this.p, this.answers);
+      const receipt = await this.center.answerQuestion(this.p, this.answers);
+      if (receipt.accepted) {
+        this.close();
+        return;
+      }
+      if (receipt.accepted === false && receipt.reason === "not-pending") {
+        new Notice("该提问已在别处处理");
+        this.close();
+        return;
+      }
+      new Notice("应答未被接受，请重试");
     } catch (err) {
-      new Notice(`提问应答失败：${err instanceof Error ? err.message : String(err)}`);
+      new Notice(`提问应答失败，请重试：${err instanceof Error ? err.message : String(err)}`);
+      // 不关闭：可重试
     }
-    this.close(); // 无论应答成败都关闭弹窗
   }
 
   onClose(): void {

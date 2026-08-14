@@ -79,7 +79,7 @@ export class DshInputBox {
     const value = this.textarea.value;
     const cursor = this.textarea.selectionStart ?? value.length;
     const before = value.slice(0, cursor);
-    const tokenMatch = before.match(/(?:^|\s)(@file:([^\s@]*)|@([^\s@/]*)|(\/)([^\s@/]*))$/);
+    const tokenMatch = before.match(/(?:^|\s)(@(?:file|folder):([^\s@]*)|@([^\s@/]*)|(\/)([^\s@/]*))$/);
     if (!tokenMatch) {
       this.closeSuggest();
       return;
@@ -100,11 +100,15 @@ export class DshInputBox {
   }
 
   private mentionCandidates(query: string): string[] {
-    const files: TFile[] = this.runtime.plugin.app.vault.getFiles();
+    const vault = this.runtime.plugin.app.vault;
     const lower = query.toLowerCase();
-    return files
+    const files = vault.getFiles()
       .filter((f) => f.path.toLowerCase().includes(lower))
       .map((f) => `@file:${f.path}`);
+    const folders = vault.getAllFolders()
+      .filter((d) => d.path !== "/" && d.path.toLowerCase().includes(lower))
+      .map((d) => `@folder:${d.path}`);
+    return [...files, ...folders].slice(0, 20);
   }
 
   private renderSuggest(): void {
@@ -127,7 +131,7 @@ export class DshInputBox {
     const value = this.textarea.value;
     const cursor = this.textarea.selectionStart ?? value.length;
     const before = value.slice(0, cursor);
-    const startMatch = before.match(/(@file:[^\s@]*|@[^\s@/]*|\/[^\s@/]*)$/);
+    const startMatch = before.match(/(@(?:file|folder):[^\s@]*|@[^\s@/]*|\/[^\s@/]*)$/);
     const start = startMatch ? before.length - startMatch[0].length : Math.max(before.lastIndexOf("@"), before.lastIndexOf("/"));
     const insert = this.suggestKind === "mention" ? item : item.split(" — ")[0];
     this.textarea.value = before.slice(0, start) + insert + value.slice(cursor);

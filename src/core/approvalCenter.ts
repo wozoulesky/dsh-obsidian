@@ -66,6 +66,7 @@ export class ApprovalCenter {
         if (this.approvals.delete(`${frame.sessionId}/${frame.approvalId}`)) this.notify();
         break;
       }
+      // 提问以信封 rpcId 为键（线上无内容键）；若服务端重放会轮换 rpcId，需在重连时清理（v1 已知取舍）。
       case "question/requested": {
         this.questions.set(rpcId, { rpcId, sessionId: frame.sessionId, questions: frame.questions });
         this.notify();

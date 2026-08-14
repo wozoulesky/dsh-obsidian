@@ -25,6 +25,9 @@ export function classifyTurnState(view: SessionView | undefined, sinceSeq: numbe
     if (n.kind === "error") return { kind: "error", message: n.text };
     if (n.kind === "assistant" && !n.streaming && n.text.length > 0) return { kind: "ready", view };
   }
+  if (view.lastTurnEndSeq > sinceSeq) {
+    return { kind: "error", message: "回合已结束，但未产生可用的替换文本" };
+  }
   return { kind: "pending" };
 }
 

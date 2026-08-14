@@ -74,4 +74,12 @@ describe("classifyTurnState", () => {
     view.nodes.push({ kind: "assistant", id: "a0", text: "旧结果", reasoning: "", toolCards: [], streaming: false, seq: 1 });
     expect(() => extractLastAssistantText(view, 2)).toThrow();
   });
+
+  it("本轮回合已结束但无文本时立即判 error", () => {
+    const view = createSessionView("s");
+    view.lastSeq = 5;
+    view.lastTurnEndSeq = 5;
+    const state = classifyTurnState(view, 0);
+    expect(state.kind).toBe("error");
+  });
 });

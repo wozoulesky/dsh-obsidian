@@ -19,13 +19,24 @@ describe("collectMentionPaths", () => {
 
 describe("resolveMentions", () => {
   it("把 @file: 标记替换为引用块并截断长内容", async () => {
-    const read = async (path: string) => (path === "a.md" ? "AAAA" : null);
+    const read = async (path: string) => (path === "a.md" ? { kind: "file" as const, text: "AAAA" } : null);
     const out = await resolveMentions("看下 @file:a.md", read, 3);
     expect(out).toBe("看下 文件 a.md：\n> AAA…");
   });
+
   it("文件不存在时替换为错误说明", async () => {
     const out = await resolveMentions("看下 @file:missing.md", async () => null, 100);
-    expect(out).toContain("找不到文件");
+    expect(out).toContain("找不到");
+  });
+
+  it("@folder: 注入目录树并标注为目录", async () => {
+    const read = async (path: string) => (path === "notes" ? { kind: "folder" as const, text: "a.md\nb/" } : null);
+    const out = await resolveMentions("整理 @folder:notes", read, 100);
+    expect(out).toBe("整理 目录 notes：\n> a.md\n> b/");
+  });
+
+  it("collectMentionPaths 同时捕获 file 与 folder 标记", () => {
+    expect(collectMentionPaths("@file:a.md @folder:notes")).toEqual(["a.md", "notes"]);
   });
 });
 

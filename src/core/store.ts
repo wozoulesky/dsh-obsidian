@@ -65,7 +65,7 @@ export class SessionStore {
     return false;
   }
 
-  /** 处理一帧 mux 推送；仅对已存在的视图（用户打开过的会话）生效，避免为所有已挂载会话物化视图。 */
+  /** 处理一帧 mux 推送；事件/队列/基线仅作用于已存在的视图（避免为所有已挂载会话物化视图），投影则允许播种（含未打开会话的标题/计划）。 */
   applyMux(_rpcId: string, frame: MuxFrame): void {
     switch (frame.type) {
       case "session/event": {
@@ -78,10 +78,16 @@ export class SessionStore {
       case "session/subscribed": {
         const view = this.views.get(frame.sessionId);
         if (!view) return;
+        let changed = false;
         if (frame.lastSeq > view.lastSeq) {
           view.lastSeq = frame.lastSeq;
-          this.notify();
+          changed = true;
         }
+        if (view.running) {
+          view.running = false; // 流重开基线：丢弃陈旧的在飞回合状态，避免永久 ⏳
+          changed = true;
+        }
+        if (changed) this.notify();
         break;
       }
       case "session/projection": {
@@ -122,6 +128,7 @@ export class SessionStore {
       rebuilt.nodes = [...rebuilt.nodes, ...current.nodes];
       if (current.lastSeq > rebuilt.lastSeq) rebuilt.lastSeq = current.lastSeq;
       if (current.running) rebuilt.running = true;
+      if (current.lastTurnEndSeq > rebuilt.lastTurnEndSeq) rebuilt.lastTurnEndSeq = current.lastTurnEndSeq;
       rebuilt.title = current.title ?? rebuilt.title;
       rebuilt.plan = current.plan.active || current.plan.pending ? current.plan : rebuilt.plan;
       rebuilt.queueItems = current.queueItems;
