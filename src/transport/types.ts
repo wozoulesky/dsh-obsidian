@@ -122,6 +122,14 @@ export interface ProjectionsBlock {
   values: Record<string, unknown>;
 }
 
+export interface CancelPayload {
+  sessionId: string;
+}
+
+export interface CancelResult {
+  accepted: true;
+}
+
 /* ---- 会话事件（最小子集 + 折叠所需的负载形状） ---- */
 
 export interface SessionEvent {
