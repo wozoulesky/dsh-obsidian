@@ -1,0 +1,87 @@
+import WebSocket from "ws";
+import type { MuxFrame, ServerRequest } from "./types";
+
+export type MuxState = "connected" | "reconnecting";
+
+export interface MuxSink {
+  /** 每帧：信封 rpcId + MuxFrame payload。 */
+  onFrame(rpcId: string, frame: MuxFrame): void;
+  /** 状态变化（去重后的转换）。 */
+  onState(state: MuxState): void;
+}
+
+export interface MuxStreamOptions {
+  backoffBaseMs?: number;
+  backoffMaxMs?: number;
+}
+
+/** 与 /api/events.mux 的纯下行 WebSocket 连接，指数退避自动重连。 */
+export class MuxStream {
+  private socket: WebSocket | null = null;
+  private stopped = false;
+  private attempt = 0;
+  private lastState: MuxState | null = null;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private readonly backoffBaseMs: number;
+  private readonly backoffMaxMs: number;
+
+  constructor(
+    private baseUrl: string,
+    private sink: MuxSink,
+    options: MuxStreamOptions = {}
+  ) {
+    this.backoffBaseMs = options.backoffBaseMs ?? 500;
+    this.backoffMaxMs = options.backoffMaxMs ?? 30000;
+  }
+
+  start(): void {
+    this.stopped = false;
+    this.connect();
+  }
+
+  private connect(): void {
+    this.emitState("reconnecting");
+    const url = this.baseUrl.replace(/^http/, "ws") + "/api/events.mux";
+    const socket = new WebSocket(url, { handshakeTimeout: 5000 });
+    this.socket = socket;
+    socket.on("open", () => {
+      this.attempt = 0;
+      this.emitState("connected");
+    });
+    socket.on("message", (data) => {
+      try {
+        const msg = JSON.parse(data.toString()) as ServerRequest;
+        this.sink.onFrame(msg.rpcId, msg.payload as MuxFrame);
+      } catch (err) {
+        console.error("[dsh-obsidian] 丢弃非法 mux 帧:", err);
+      }
+    });
+    socket.on("close", () => this.scheduleReconnect());
+    socket.on("error", () => {
+      /* close 事件随后触发；这里不直接重连，避免与 close 重复调度 */
+    });
+  }
+
+  private scheduleReconnect(): void {
+    if (this.stopped) return;
+    this.attempt += 1;
+    const delay = Math.min(this.backoffMaxMs, this.backoffBaseMs * 2 ** (this.attempt - 1));
+    this.timer = setTimeout(() => {
+      if (!this.stopped) this.connect();
+    }, delay);
+  }
+
+  private emitState(state: MuxState): void {
+    if (this.lastState !== state) {
+      this.lastState = state;
+      this.sink.onState(state);
+    }
+  }
+
+  stop(): void {
+    this.stopped = true;
+    if (this.timer) clearTimeout(this.timer);
+    this.socket?.close();
+    this.socket = null;
+  }
+}
