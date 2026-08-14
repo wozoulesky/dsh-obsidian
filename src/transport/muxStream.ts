@@ -15,6 +15,12 @@ export interface MuxStreamOptions {
   backoffMaxMs?: number;
 }
 
+/** 指数退避延迟（纯函数）：attempt 从 1 起算，cap 封顶。 */
+export function backoffDelay(attempt: number, baseMs: number, maxMs: number): number {
+  const n = Math.max(attempt - 1, 0);
+  return Math.min(maxMs, baseMs * 2 ** n);
+}
+
 /** 与 /api/events.mux 的纯下行 WebSocket 连接，指数退避自动重连。 */
 export class MuxStream {
   private socket: WebSocket | null = null;
@@ -82,7 +88,7 @@ export class MuxStream {
     if (this.stopped) return;
     this.emitState("reconnecting");
     this.attempt += 1;
-    const delay = Math.min(this.backoffMaxMs, this.backoffBaseMs * 2 ** (this.attempt - 1));
+    const delay = backoffDelay(this.attempt, this.backoffBaseMs, this.backoffMaxMs);
     this.timer = setTimeout(() => {
       if (!this.stopped) this.connect();
     }, delay);
