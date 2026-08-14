@@ -15,6 +15,7 @@ export class DshChatView extends ItemView {
   private input!: DshInputBox;
   private lastRenderAt = 0;
   private renderPending = false;
+  private renderTimer: ReturnType<typeof setTimeout> | null = null;
   private approvalModalOpen = false;
   private questionModalOpen = false;
   private disposers: (() => void)[] = [];
@@ -67,6 +68,10 @@ export class DshChatView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    if (this.renderTimer) {
+      clearTimeout(this.renderTimer);
+      this.renderTimer = null;
+    }
     for (const dispose of this.disposers) dispose();
     this.disposers = [];
   }
@@ -134,14 +139,20 @@ export class DshChatView extends ItemView {
     });
   }
 
+  /** 外部（如命令面板）触发会话列表变化后刷新头部下拉。 */
+  refreshHeader(): void {
+    this.renderHeader();
+  }
+
   /** 渲染当前会话（限流：chunk 高频推送时每 150ms 最多重绘一次）。 */
   private render(): void {
     const now = Date.now();
     if (now - this.lastRenderAt < 150) {
       if (!this.renderPending) {
         this.renderPending = true;
-        setTimeout(() => {
+        this.renderTimer = setTimeout(() => {
           this.renderPending = false;
+          this.renderTimer = null;
           this.renderNow();
         }, 150);
       }

@@ -1,4 +1,4 @@
-import { App, TFile } from "obsidian";
+import { TFile } from "obsidian";
 import { BUILTIN_COMMANDS } from "./prompts";
 import type { DshRuntime } from "../main";
 import type { SessionView } from "../core/eventFold";
@@ -79,13 +79,13 @@ export class DshInputBox {
     const value = this.textarea.value;
     const cursor = this.textarea.selectionStart ?? value.length;
     const before = value.slice(0, cursor);
-    const tokenMatch = before.match(/(?:^|\s)([@/])([^\s@/]*)$/);
+    const tokenMatch = before.match(/(?:^|\s)(@file:([^\s@]*)|@([^\s@/]*)|(\/)([^\s@/]*))$/);
     if (!tokenMatch) {
       this.closeSuggest();
       return;
     }
-    const kind = tokenMatch[1] === "@" ? "mention" : "slash";
-    const query = tokenMatch[2].toLowerCase();
+    const kind = tokenMatch[1].startsWith("@") ? "mention" : "slash";
+    const query = (kind === "mention" ? (tokenMatch[2] ?? tokenMatch[3]) : tokenMatch[5] ?? "").toLowerCase();
     const items = kind === "slash"
       ? BUILTIN_COMMANDS.filter((c) => c.name.startsWith(query)).map((c) => `${c.name} — ${c.description}`)
       : this.mentionCandidates(query).slice(0, 20);
@@ -127,7 +127,8 @@ export class DshInputBox {
     const value = this.textarea.value;
     const cursor = this.textarea.selectionStart ?? value.length;
     const before = value.slice(0, cursor);
-    const start = Math.max(before.lastIndexOf("@"), before.lastIndexOf("/"));
+    const startMatch = before.match(/(@file:[^\s@]*|@[^\s@/]*|\/[^\s@/]*)$/);
+    const start = startMatch ? before.length - startMatch[0].length : Math.max(before.lastIndexOf("@"), before.lastIndexOf("/"));
     const insert = this.suggestKind === "mention" ? item : item.split(" — ")[0];
     this.textarea.value = before.slice(0, start) + insert + value.slice(cursor);
     this.closeSuggest();

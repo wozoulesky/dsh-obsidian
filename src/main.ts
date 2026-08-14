@@ -66,6 +66,8 @@ export default class DshPlugin extends Plugin {
         try {
           await manager.newSession();
           await this.activateView();
+          const view = this.app.workspace.getLeavesOfType(VIEW_TYPE_DSH_CHAT)[0]?.view;
+          if (view instanceof DshChatView) view.refreshHeader();
         } catch (err) {
           new Notice(`新建会话失败：${err instanceof Error ? err.message : String(err)}`);
         }
@@ -84,8 +86,13 @@ export default class DshPlugin extends Plugin {
     const { workspace } = this.app;
     let leaf = workspace.getLeavesOfType(VIEW_TYPE_DSH_CHAT)[0];
     if (!leaf) {
-      leaf = workspace.getRightLeaf(false) as WorkspaceLeaf;
-      await leaf.setViewState({ type: VIEW_TYPE_DSH_CHAT, active: true });
+      const right = workspace.getRightLeaf(false);
+      if (!right) {
+        new Notice("无法打开 DSH 面板：右侧栏不可用");
+        return;
+      }
+      await right.setViewState({ type: VIEW_TYPE_DSH_CHAT, active: true });
+      leaf = right;
     }
     workspace.revealLeaf(leaf);
   }
