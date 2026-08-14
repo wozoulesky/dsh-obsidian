@@ -1,4 +1,3 @@
-import { TFile } from "obsidian";
 import { BUILTIN_COMMANDS } from "./prompts";
 import type { DshRuntime } from "../main";
 import type { SessionView } from "../core/eventFold";
