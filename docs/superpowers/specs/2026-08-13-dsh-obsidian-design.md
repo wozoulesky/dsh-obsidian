@@ -59,16 +59,16 @@
 
 ## 3. 架构与组件
 
-技术栈：TypeScript + esbuild，标准 Obsidian 插件结构。传输层只用 Node 内置 `http` 模块（零运行时依赖；不经 Chromium `fetch`，请求不带 `Origin` 头，通过 DSH 安全围栏）。
+技术栈：TypeScript + esbuild，标准 Obsidian 插件结构。一元调用用 Node 内置 `http` 模块；事件流用打包进来的 `ws` 客户端（WebSocket，Node 环境不自动附加 `Origin` 头，通过 DSH 安全围栏）。
 
 ```
 src/
 ├── main.ts                 # 入口：注册视图、命令、设置面板
 ├── settings.ts             # DSH 地址、模板、截断上限等持久化配置
 ├── transport/
-│   ├── dshClient.ts        # 一元 RPC：POST /api/<method> 与 /api/respond
-│   ├── sseStream.ts        # mux 事件流：Node http 流式读取 + SSE 帧解析 + 指数退避重连
-│   └── types.ts            # 与 dsh-host-apiproxy 对齐的类型（信封/会话/事件）
+│   ├── types.ts            # 与 dsh-host-apiproxy 对齐的类型（信封/会话/事件）
+│   ├── client.ts           # 一元 RPC：POST /api/<method> 与 /api/respond
+│   └── muxStream.ts        # mux 事件流：ws WebSocket 帧解析 + 指数退避重连
 ├── core/
 │   ├── sessionManager.ts   # 会话列表、切换、创建（cwd=vault）
 │   ├── eventFold.ts        # SessionEvent 流 → 视图模型（消息/工具卡片/投影/审批）
@@ -98,7 +98,7 @@ src/
 2. **历史与翻页**：切换会话时 `session.history`（尾页含投影基线）播种视图模型，mux 流增量更新；「加载更早」用 `beforeSeq` 翻页。
 3. **内联编辑专用会话**：与聊天会话隔离，全部内联编辑复用一个专用会话（设置可重置）；指令模板约束「只输出替换文本」；提取失败（无文本/超时）时提示用户，不改动编辑器。
 4. **会话范围**：列表默认展示全部会话、vault 绑定置顶标记；「新建」一律 `session.create({cwd: vault路径})`。
-5. **重连**：SSE 断开后指数退避重连（重开流 + 重新拉尾页历史），面板顶部显示连接状态条。
+5. **重连**：WebSocket 断开后指数退避重连（重开流 + 重新拉尾页历史），面板顶部显示连接状态条。
 6. **审批/提问弹窗**：按会话分组；mux 重开时会重放未决审批帧（服务端行为），保证切换会话不丢审批。
 
 ## 4. DSH 接口契约（依据 @deepseek-ai/dsh 0.1.0-rc.6 源码确认）
@@ -106,7 +106,7 @@ src/
 ### 传输与信封
 
 - 一元调用：`POST /api/<method>`，请求体 `{type:"client-request", rpcId:"<uuid>", method, payload}`；响应 `{rpcId, result:{ok:true, value}|{ok:false, error:{code,message,details}}}`；客户端校验 rpcId 回显。
-- 事件流：`GET /api/events.mux`，SSE 格式（`\n\n` 分帧、`data:` 行），帧为 `{rpcId, payload}`，payload 见下方 MuxFrame 联合类型。
+- 事件流：`ws://<host>/api/events.mux` 的 **WebSocket 连接**（服务端对纯 HTTP GET 返回 426 upgrade required；rc.6 不支持 SSE 直连）。文本帧 JSON 为 `{type:'server-request', rpcId, method, payload}`，payload 即 MuxFrame；连接后服务端立即推送各已挂载会话的 `session/subscribed` 基线并重放未决审批帧，纯下行（客户端无需发消息）。
 - 应答：`POST /api/respond`（审批 outcome / 提问回答），信封与一元调用相同。
 
 ### 用到的 API 方法
@@ -125,7 +125,7 @@ src/
 
 ### 安全围栏（api-request-trust）
 
-规则：`Host` 头必须为回环地址或可信 authority；带浏览器标记（Origin/Fetch-Metadata）的请求必须同源。插件用 Node `http` 模块：无 `Origin` 头、`Host: 127.0.0.1:3080` 为回环 → 放行。**禁止**渲染进程 `fetch`/`requestUrl` 直连。
+规则：`Host` 头必须为回环地址或可信 authority；带浏览器标记（Origin/Fetch-Metadata）的请求必须同源。插件一元调用用 Node `http` 模块（无 `Origin` 头、`Host: 127.0.0.1:3080` 为回环 → 放行）；事件流用打包的 `ws` Node 客户端（Node 环境不发 `Origin` → 放行）。**禁止**渲染进程 `fetch`/`requestUrl`/原生 `WebSocket` 直连（会带 `app://obsidian.md` 的 Origin 标记，被围栏拒绝）。
 
 ### 已知限制
 
