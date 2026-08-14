@@ -4,6 +4,6 @@
   "version": "0.1.0",
   "minAppVersion": "1.7.2",
   "description": "将本地 DeepSeek Harness (DSH) 作为 AI 协作者嵌入 vault：聊天、内联编辑、@提及与斜杠命令",
-  "author": "dsh-bridge",
+  "author": "wozoulesky",
   "isDesktopOnly": true
 }
