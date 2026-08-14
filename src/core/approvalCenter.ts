@@ -23,8 +23,10 @@ export class ApprovalCenter {
 
   constructor(private client: DshClient) {}
 
-  onChange(listener: () => void): void {
+  /** 注册变更监听，返回解除函数（视图关闭时必须调用，避免泄漏）。 */
+  onChange(listener: () => void): () => void {
     this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 
   private notify(): void {
