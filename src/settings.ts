@@ -26,8 +26,12 @@ export class DshSettings {
   ) {}
 
   async load(): Promise<void> {
-    const data = (await this.host.loadData()) as Partial<DshPluginSettings> | null;
-    this.values = { ...DEFAULT_SETTINGS, ...(data ?? {}) };
+    const raw = await this.host.loadData();
+    const data =
+      typeof raw === "object" && raw !== null && !Array.isArray(raw)
+        ? (raw as Partial<DshPluginSettings>)
+        : {};
+    this.values = { ...DEFAULT_SETTINGS, ...data };
   }
 
   async save(): Promise<void> {

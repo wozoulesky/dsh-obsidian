@@ -8,6 +8,7 @@ const context = await esbuild.context({
   banner: { js: `/* dsh-obsidian — built ${new Date().toISOString()} */` },
   entryPoints: ["src/main.ts"],
   bundle: true,
+  platform: "node",
   external: [
     "obsidian",
     "electron",

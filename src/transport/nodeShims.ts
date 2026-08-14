@@ -1,6 +1,5 @@
 /**
- * Obsidian 渲染进程以 nodeIntegration=false 运行，但插件运行时仍可 require 内置模块。
- * 打包进产物的 `ws` 依赖 Buffer/global/process.nextTick，这里补齐缺失的全局。
+ * 打包进产物的 ws 依赖 Buffer/global/process.nextTick/setImmediate，这里补齐缺失的全局。
  */
 declare function require(module: string): unknown;
 
@@ -14,7 +13,15 @@ export function installNodeShims(): void {
     g.global = g;
   }
   const proc = g.process as (NodeJS.Process & Record<string, unknown>) | undefined;
-  if (proc && typeof proc.nextTick !== "function") {
-    proc.nextTick = (fn: () => void) => queueMicrotask(fn);
+  if (proc) {
+    if (typeof proc.nextTick !== "function") {
+      proc.nextTick = (fn: (...args: unknown[]) => void, ...args: unknown[]) => queueMicrotask(() => fn(...args));
+    }
+  }
+  if (typeof g.setImmediate === "undefined") {
+    g.setImmediate = (fn: () => void) => setTimeout(fn, 0);
+  }
+  if (typeof g.clearImmediate === "undefined") {
+    g.clearImmediate = (id: unknown) => clearTimeout(id as number);
   }
 }
