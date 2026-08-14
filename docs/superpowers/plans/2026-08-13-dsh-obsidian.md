@@ -556,6 +556,13 @@ export interface AskUserQuestionItem {
   intent?: { kind: "plan-review"; approve: string };
 }
 
+/** 对一个提问的作答（selected 为选项标签；custom 为自由回答文本）。 */
+export interface AskUserQuestionAnswerItem {
+  id: string;
+  selected: string[];
+  custom?: string;
+}
+
 export interface QueuedInboxItem {
   id: string;
   placement: "queued" | "steering" | "context";

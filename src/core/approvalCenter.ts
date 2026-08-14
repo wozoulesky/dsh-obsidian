@@ -1,12 +1,5 @@
 import type { DshClient } from "../transport/client";
-import type { AskUserQuestionItem, MuxFrame, RpcReceipt } from "../transport/types";
-
-/** 提问答案项（types.ts 未导出，故在此本地声明以保持零改动约束）。 */
-export interface AskUserQuestionAnswerItem {
-  id: string;
-  selected: string[];
-  custom?: string;
-}
+import type { AskUserQuestionAnswerItem, AskUserQuestionItem, MuxFrame, RpcReceipt } from "../transport/types";
 
 export interface PendingApproval {
   rpcId: string;
