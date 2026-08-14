@@ -12,8 +12,10 @@ export class SessionStore {
   private projections = new Map<string, Map<string, ProjectionCell>>();
   private listeners = new Set<() => void>();
 
-  onChange(listener: () => void): void {
+  /** 注册变更监听，返回解除函数（视图关闭时必须调用，避免泄漏）。 */
+  onChange(listener: () => void): () => void {
     this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 
   private notify(): void {
@@ -39,40 +41,59 @@ export class SessionStore {
     return this.views.get(sessionId);
   }
 
-  private applyProjection(sessionId: string, key: string, value: unknown, seq: number): void {
+  /** 返回 true 表示视图可见状态发生了变化（调用方才需要 notify）。 */
+  private applyProjection(sessionId: string, key: string, value: unknown, seq: number): boolean {
     const cells = this.projections.get(sessionId) ?? new Map<string, ProjectionCell>();
     const prev = cells.get(key);
-    if (prev && prev.seq > seq) return; // higher-seq-wins
+    if (prev && prev.seq > seq) return false; // higher-seq-wins
     cells.set(key, { value, seq });
     this.projections.set(sessionId, cells);
     const view = this.ensureView(sessionId);
     if (key === "title") {
-      if (typeof value === "string" && value.length > 0) view.title = value;
-    } else if (key === "plan") {
+      if (typeof value === "string" && value.length > 0) {
+        view.title = value;
+        return true;
+      }
+      return false;
+    }
+    if (key === "plan") {
+      if (typeof value !== "object" || value === null) return false;
       const plan = value as { active?: boolean; pending?: boolean };
       view.plan = { active: plan.active === true, pending: plan.pending === true };
+      return true;
     }
+    return false;
   }
 
-  /** 处理一帧 mux 推送（rpcId 为帧信封 id，仅审批/提问需要，这里透传保留）。 */
+  /** 处理一帧 mux 推送；仅对已存在的视图（用户打开过的会话）生效，避免为所有已挂载会话物化视图。 */
   applyMux(_rpcId: string, frame: MuxFrame): void {
     switch (frame.type) {
-      case "session/event":
-        foldEvent(this.ensureView(frame.sessionId), frame.event);
-        this.notify();
-        break;
-      case "session/subscribed": {
-        const view = this.ensureView(frame.sessionId);
-        if (frame.lastSeq > view.lastSeq) view.lastSeq = frame.lastSeq;
+      case "session/event": {
+        const view = this.views.get(frame.sessionId);
+        if (!view) return;
+        foldEvent(view, frame.event);
         this.notify();
         break;
       }
-      case "session/projection":
-        this.applyProjection(frame.sessionId, frame.key, frame.value, frame.seq);
-        this.notify();
+      case "session/subscribed": {
+        const view = this.views.get(frame.sessionId);
+        if (!view) return;
+        if (frame.lastSeq > view.lastSeq) {
+          view.lastSeq = frame.lastSeq;
+          this.notify();
+        }
         break;
+      }
+      case "session/projection": {
+        if (this.applyProjection(frame.sessionId, frame.key, frame.value, frame.seq)) {
+          this.notify();
+        }
+        break;
+      }
       case "session/queue": {
-        this.ensureView(frame.sessionId).queueItems = frame.items;
+        const view = this.views.get(frame.sessionId);
+        if (!view) return;
+        view.queueItems = frame.items;
         this.notify();
         break;
       }
@@ -88,9 +109,39 @@ export class SessionStore {
     this.notify();
   }
 
-  /** 清空单个会话视图（重连重建用）。 */
+  /**
+   * 前插一页更早的历史：在 store 内重建视图（折叠旧页 + 拼接现有节点），
+   * 保证 lastSeq/running/title/plan/queueItems 状态一致，并 notify 一次。
+   * 计划状态启发式：现有页若未观察到任何计划状态则沿用旧页的。
+   */
+  prependHistory(sessionId: string, entries: HistoryEntry[]): void {
+    const current = this.views.get(sessionId);
+    const rebuilt = createSessionView(sessionId);
+    for (const entry of entries) foldEvent(rebuilt, entry.event);
+    if (current) {
+      rebuilt.nodes = [...rebuilt.nodes, ...current.nodes];
+      if (current.lastSeq > rebuilt.lastSeq) rebuilt.lastSeq = current.lastSeq;
+      if (current.running) rebuilt.running = true;
+      rebuilt.title = current.title ?? rebuilt.title;
+      rebuilt.plan = current.plan.active || current.plan.pending ? current.plan : rebuilt.plan;
+      rebuilt.queueItems = current.queueItems;
+    }
+    this.views.set(sessionId, rebuilt);
+    this.notify();
+  }
+
+  /** 在 store 内设置标题并 notify（供历史尾页投影播种使用）。 */
+  setTitle(sessionId: string, title: string): void {
+    const view = this.views.get(sessionId);
+    if (!view) return;
+    view.title = title;
+    this.notify();
+  }
+
+  /** 清空单个会话视图与其投影单元（重连重建用）。 */
   dropView(sessionId: string): void {
     this.views.delete(sessionId);
+    this.projections.delete(sessionId);
     this.notify();
   }
 }
