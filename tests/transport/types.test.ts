@@ -18,5 +18,7 @@ describe("isServerResponse", () => {
     expect(isServerResponse(null)).toBe(false);
     expect(isServerResponse({})).toBe(false);
     expect(isServerResponse({ type: "client-request", rpcId: "x", method: "m", payload: {} })).toBe(false);
+    expect(isServerResponse({ type: "server-response", rpcId: "x", result: {} })).toBe(false);
+    expect(isServerResponse({ type: "server-response", rpcId: 123, result: { ok: true, value: 1 } })).toBe(false);
   });
 });

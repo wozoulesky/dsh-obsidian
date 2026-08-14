@@ -2,6 +2,7 @@
 
 /* ---- RPC 信封 ---- */
 
+// 注意：与 rc.6 严格 schema（closed code 联合 + 必填 details）相比，这里刻意放宽为透传形态。
 export interface RpcError {
   code: string;
   message: string;
@@ -41,7 +42,9 @@ export type RpcReceipt = { accepted: true } | { accepted: false; reason: "not-pe
 export function isServerResponse(x: unknown): x is ServerResponse {
   if (typeof x !== "object" || x === null) return false;
   const o = x as Record<string, unknown>;
-  return o.type === "server-response" && typeof o.rpcId === "string" && typeof o.result === "object" && o.result !== null;
+  if (o.type !== "server-response" || typeof o.rpcId !== "string") return false;
+  if (typeof o.result !== "object" || o.result === null) return false;
+  return typeof (o.result as { ok?: unknown }).ok === "boolean";
 }
 
 /** 浏览器安全 UUID v4（不依赖 secure context，Electron 渲染进程可用）。 */
@@ -196,7 +199,7 @@ export type MuxFrame =
   | { type: "session/jobs"; sessionId: string; jobs: unknown[] }
   | { type: "session/projection"; sessionId: string; key: string; value: unknown; seq: number }
   | { type: "approval/requested"; sessionId: string; approvalId: string; toolName: string; callId?: string; reason?: string }
-  | { type: "approval/resolved"; sessionId: string; approvalId: string; outcome: string }
+  | { type: "approval/resolved"; sessionId: string; approvalId: string; outcome: "allowed-once" | "rejected" | "cancelled" | "unavailable" }
   | { type: "question/requested"; sessionId: string; questions: AskUserQuestionItem[] }
   | { type: "question/resolved"; sessionId: string; questionRpcId: string; outcome: "answered" | "cancelled" }
   | { type: "stream/error"; error: RpcError };
