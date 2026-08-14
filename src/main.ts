@@ -9,6 +9,7 @@ import { ApprovalCenter } from "./core/approvalCenter";
 import { InlineEditService } from "./core/inlineEdit";
 import { DshChatView, VIEW_TYPE_DSH_CHAT } from "./ui/chatView";
 import { InlineEditModal } from "./ui/inlineEditModal";
+import { DshSettingTab } from "./ui/settingsTab";
 
 export interface DshRuntime {
   plugin: DshPlugin;
@@ -83,6 +84,7 @@ export default class DshPlugin extends Plugin {
       name: "DSH 内联编辑选区",
       editorCallback: (editor: Editor) => new InlineEditModal(this.app, this.runtime, editor).open(),
     });
+    this.addSettingTab(new DshSettingTab(this.app, this));
 
     mux.start();
     manager.refresh().catch((err) => console.error("[dsh-obsidian] 会话列表拉取失败:", err));
