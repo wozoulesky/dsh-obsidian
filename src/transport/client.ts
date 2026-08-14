@@ -8,12 +8,17 @@ export class TransportFailure extends Error {
   }
 }
 
-export const transportFailure = TransportFailure;
-
-/** Node http POST，返回响应文本；非 2xx 抛 TransportFailure。 */
+/** Node http POST，返回响应文本；非 2xx 或提前断开抛 TransportFailure；硬超时兜底。 */
 export function postJson(url: string, body: string, timeoutMs: number): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const u = new URL(url);
+    let settled = false;
+    const fail = (err: TransportFailure) => {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    };
+    const deadline = setTimeout(() => fail(new TransportFailure(`timeout after ${timeoutMs}ms`)), timeoutMs);
     const req = http.request(
       {
         hostname: u.hostname,
@@ -29,6 +34,9 @@ export function postJson(url: string, body: string, timeoutMs: number): Promise<
         const chunks: Buffer[] = [];
         res.on("data", (c: Buffer) => chunks.push(c));
         res.on("end", () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(deadline);
           const text = Buffer.concat(chunks).toString("utf8");
           if (res.statusCode !== undefined && res.statusCode >= 200 && res.statusCode < 300) {
             resolve(text);
@@ -36,10 +44,16 @@ export function postJson(url: string, body: string, timeoutMs: number): Promise<
             reject(new TransportFailure(`HTTP ${String(res.statusCode)} for ${url}`));
           }
         });
+        res.on("aborted", () => fail(new TransportFailure(`connection aborted for ${url}`)));
+        res.on("close", () => fail(new TransportFailure(`connection closed prematurely for ${url}`)));
+        res.on("error", (err) => fail(new TransportFailure(err.message, err)));
       }
     );
     req.setTimeout(timeoutMs, () => req.destroy(new TransportFailure(`timeout after ${timeoutMs}ms`)));
-    req.on("error", (err) => reject(new TransportFailure(err.message, err)));
+    req.on("error", (err) => {
+      clearTimeout(deadline);
+      fail(new TransportFailure(err.message, err));
+    });
     req.write(body);
     req.end();
   });
@@ -48,8 +62,6 @@ export function postJson(url: string, body: string, timeoutMs: number): Promise<
 export interface DshClientOptions {
   baseUrl: string;
   timeoutMs?: number;
-  /** 测试钩子：强制某个调用的 rpcId（服务端据此回显不匹配的 id）。 */
-  forceRpcId?: string;
 }
 
 export class DshClient {
@@ -57,7 +69,7 @@ export class DshClient {
 
   /** 通用一元调用：铸造 rpcId → POST /api/<method> → 校验回显 → 返回 result。 */
   async call<T>(method: string, payload: unknown, overrides?: { forceRpcId?: string }): Promise<RpcResult<T>> {
-    const rpcId = overrides?.forceRpcId ?? this.opts.forceRpcId ?? mintId();
+    const rpcId = overrides?.forceRpcId ?? mintId();
     const request: ClientRequest = { type: "client-request", rpcId, method, payload };
     const timeoutMs = this.opts.timeoutMs ?? 30000;
     const text = await postJson(`${this.opts.baseUrl}/api/${method}`, JSON.stringify(request), timeoutMs);
@@ -87,7 +99,12 @@ export class DshClient {
     const message: ClientResponse = { type: "client-response", rpcId, result: { ok: true, value } };
     const timeoutMs = this.opts.timeoutMs ?? 30000;
     const text = await postJson(`${this.opts.baseUrl}/api/respond`, JSON.stringify(message), timeoutMs);
-    const receipt = JSON.parse(text) as RpcReceipt;
+    let receipt: RpcReceipt;
+    try {
+      receipt = JSON.parse(text) as RpcReceipt;
+    } catch {
+      return { accepted: false, reason: "bad-response" };
+    }
     if (receipt.accepted === true) return receipt;
     if (receipt.accepted === false) return receipt;
     return { accepted: false, reason: "bad-response" };
