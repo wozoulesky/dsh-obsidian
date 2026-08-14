@@ -1,4 +1,4 @@
-import { Notice, Plugin, WorkspaceLeaf } from "obsidian";
+import { Editor, Notice, Plugin, WorkspaceLeaf } from "obsidian";
 import { installNodeShims } from "./transport/nodeShims";
 import { DshSettings } from "./settings";
 import { DshClient } from "./transport/client";
@@ -6,7 +6,9 @@ import { MuxStream, type MuxState } from "./transport/muxStream";
 import { SessionStore } from "./core/store";
 import { SessionManager } from "./core/sessionManager";
 import { ApprovalCenter } from "./core/approvalCenter";
+import { InlineEditService } from "./core/inlineEdit";
 import { DshChatView, VIEW_TYPE_DSH_CHAT } from "./ui/chatView";
+import { InlineEditModal } from "./ui/inlineEditModal";
 
 export interface DshRuntime {
   plugin: DshPlugin;
@@ -16,6 +18,7 @@ export interface DshRuntime {
   store: SessionStore;
   manager: SessionManager;
   approvals: ApprovalCenter;
+  inlineEdit: InlineEditService;
   muxState: MuxState | null;
 }
 
@@ -41,6 +44,7 @@ export default class DshPlugin extends Plugin {
       manager,
       approvals,
       mux: undefined as unknown as MuxStream,
+      inlineEdit: undefined as unknown as InlineEditService,
       muxState: null,
     };
     const mux = new MuxStream(this.settings.dshUrl, {
@@ -54,6 +58,7 @@ export default class DshPlugin extends Plugin {
       },
     });
     runtime.mux = mux;
+    runtime.inlineEdit = new InlineEditService({ manager, store, settings: this.settings });
     this.runtime = runtime;
 
     this.registerView(VIEW_TYPE_DSH_CHAT, (leaf: WorkspaceLeaf) => new DshChatView(leaf, runtime));
@@ -72,6 +77,11 @@ export default class DshPlugin extends Plugin {
           new Notice(`新建会话失败：${err instanceof Error ? err.message : String(err)}`);
         }
       },
+    });
+    this.addCommand({
+      id: "inline-edit",
+      name: "DSH 内联编辑选区",
+      editorCallback: (editor: Editor) => new InlineEditModal(this.app, this.runtime, editor).open(),
     });
 
     mux.start();
