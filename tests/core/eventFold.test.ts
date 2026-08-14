@@ -95,4 +95,67 @@ describe("foldEvent", () => {
     foldEvent(view, ev("turn/end", 2, { turn: 1, reason: { kind: "error", error: { message: "模型挂了", code: "E1" } } }));
     expect(view.nodes.at(-1)).toMatchObject({ kind: "error", text: "回合错误：模型挂了" });
   });
+
+  it("同一回合多步骤生成多个 assistant 节点", () => {
+    const view = createSessionView("s1");
+    foldEvent(view, ev("assistant/chunk", 1, { turn: 1, step: 1, chunk: { type: "text-delta", index: 0, text: "第一步" } }));
+    foldEvent(view, ev("assistant/message", 2, { turn: 1, step: 1, message: { id: "am1", role: "assistant", content: [{ type: "text", text: "第一步" }], source: { kind: "model", provider: "p", model: "m" } } }));
+    foldEvent(view, ev("assistant/chunk", 3, { turn: 1, step: 2, chunk: { type: "text-delta", index: 0, text: "第二步" } }));
+    foldEvent(view, ev("assistant/message", 4, { turn: 1, step: 2, message: { id: "am2", role: "assistant", content: [{ type: "text", text: "第二步" }], source: { kind: "model", provider: "p", model: "m" } } }));
+    expect(view.nodes.filter((n) => n.kind === "assistant")).toHaveLength(2);
+    expect(view.nodes[0]).toMatchObject({ text: "第一步", streaming: false });
+    expect(view.nodes[1]).toMatchObject({ text: "第二步", streaming: false });
+  });
+
+  it("tool/result 的 isError 信号置为错误状态", () => {
+    const view = createSessionView("s1");
+    foldEvent(view, ev("assistant/message", 1, {
+      turn: 1, step: 1,
+      message: { id: "am1", role: "assistant", content: [{ type: "tool-call", id: "c1", name: "write", arguments: "{}" }], source: { kind: "model", provider: "p", model: "m" } },
+    }));
+    foldEvent(view, ev("tool/result", 2, {
+      turn: 1, step: 1,
+      message: { id: "tr1", role: "user", content: [{ type: "tool-result", toolCallId: "c1", content: [{ type: "text", text: "失败原因" }], isError: true }], source: { kind: "tool", callId: "c1" } },
+    }));
+    const node = view.nodes[0];
+    if (node.kind === "assistant") {
+      expect(node.toolCards[0]).toMatchObject({ status: "error", resultText: "失败原因" });
+    }
+  });
+
+  it("无流式前缀的 assistant/message 填充文本", () => {
+    const view = createSessionView("s1");
+    foldEvent(view, ev("assistant/message", 1, {
+      turn: 1, step: 1,
+      message: { id: "am1", role: "assistant", content: [{ type: "text", text: "完整回复" }], source: { kind: "model", provider: "p", model: "m" } },
+    }));
+    expect(view.nodes[0]).toMatchObject({ kind: "assistant", text: "完整回复", streaming: false });
+  });
+
+  it("assistant/message 提取 reasoning 块（历史回放路径）", () => {
+    const view = createSessionView("s1");
+    foldEvent(view, ev("assistant/message", 1, {
+      turn: 1, step: 1,
+      message: {
+        id: "am1",
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "思考过程" },
+          { type: "text", text: "回复" },
+        ],
+        source: { kind: "model", provider: "p", model: "m" },
+      },
+    }));
+    expect(view.nodes[0]).toMatchObject({ kind: "assistant", reasoning: "思考过程", text: "回复" });
+  });
+
+  it("独立 tool/call 事件创建工具卡片", () => {
+    const view = createSessionView("s1");
+    foldEvent(view, ev("tool/call", 1, { turn: 1, step: 1, callId: "c9", name: "bash", arguments: '{"cmd":"ls"}' }));
+    const node = view.nodes[0];
+    expect(node.kind).toBe("assistant");
+    if (node.kind === "assistant") {
+      expect(node.toolCards[0]).toMatchObject({ id: "c9", name: "bash", status: "running" });
+    }
+  });
 });

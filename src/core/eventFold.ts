@@ -62,7 +62,7 @@ export function createSessionView(sessionId: string): SessionView {
 /** 从内容块提取可见文本（text 块以空行连接）。 */
 export function blocksToText(blocks: ContentBlock[]): string {
   return blocks
-    .filter((b): b is { type: "text"; text: string } => b.type === "text")
+    .filter((b): b is { type: "text"; text: string } => typeof b === "object" && b !== null && b.type === "text")
     .map((b) => b.text)
     .join("\n\n");
 }
@@ -94,7 +94,8 @@ function applyChunk(node: AssistantNode, chunk: StreamChunk): void {
       node.reasoning += chunk.text;
       break;
     case "tool-call-delta": {
-      const card = node.toolCards.find((c) => c.id === chunk.id) ?? node.toolCards[node.toolCards.length - 1];
+      // 只允许精确 id 匹配；block-end 会携带完整 arguments，未命中的增量直接忽略
+      const card = node.toolCards.find((c) => c.id === chunk.id);
       if (card && card.status === "running") card.args += chunk.argumentsDelta;
       break;
     }
@@ -154,7 +155,7 @@ export function foldEvent(view: SessionView, event: SessionEvent): void {
       const message = data.message as { id?: string; content?: ContentBlock[] };
       const content = message?.content ?? [];
       const text = blocksToText(content);
-      const toolCalls = content.filter((b): b is Extract<ContentBlock, { type: "tool-call" }> => b.type === "tool-call");
+      const toolCalls = content.filter((b): b is Extract<ContentBlock, { type: "tool-call" }> => typeof b === "object" && b !== null && b.type === "tool-call");
       const existing = lastAssistant(view);
       const target: AssistantNode = existing?.streaming
         ? existing
@@ -170,10 +171,31 @@ export function foldEvent(view: SessionView, event: SessionEvent): void {
       if (!existing?.streaming) view.nodes.push(target);
       target.streaming = false;
       if (target.text.length === 0) target.text = text;
+      if (target.reasoning.length === 0) {
+        target.reasoning = content
+          .filter((b): b is Extract<ContentBlock, { type: "reasoning" }> => typeof b === "object" && b !== null && b.type === "reasoning")
+          .map((b) => b.text)
+          .join("\n\n");
+      }
       for (const call of toolCalls) {
         if (!target.toolCards.some((c) => c.id === call.id)) {
           target.toolCards.push({ id: call.id, name: call.name, args: call.arguments, status: "running" });
         }
+      }
+      break;
+    }
+    case "tool/call": {
+      const callId = typeof data.callId === "string" ? data.callId : "";
+      const name = typeof data.name === "string" ? data.name : "";
+      const args = typeof data.arguments === "string" ? data.arguments : "";
+      if (!callId) break;
+      let target = lastAssistant(view);
+      if (!target) {
+        target = { kind: "assistant", id: `a-${event.seq}`, text: "", reasoning: "", toolCards: [], streaming: false, seq: event.seq };
+        view.nodes.push(target);
+      }
+      if (!target.toolCards.some((c) => c.id === callId)) {
+        target.toolCards.push({ id: callId, name, args, status: "running" });
       }
       break;
     }
@@ -183,10 +205,11 @@ export function foldEvent(view: SessionView, event: SessionEvent): void {
       if (!callId) break;
       const card = findCard(view, callId);
       if (card) {
-        card.status = ((data.error ?? undefined) !== undefined ? "error" : "done") as ToolCard["status"];
         const toolResult = (message?.content ?? []).find(
-          (b): b is Extract<ContentBlock, { type: "tool-result" }> => b.type === "tool-result",
+          (b): b is Extract<ContentBlock, { type: "tool-result" }> => typeof b === "object" && b !== null && b.type === "tool-result",
         );
+        const hasError = (data.error ?? undefined) !== undefined || toolResult?.isError === true;
+        card.status = hasError ? "error" : "done";
         card.resultText = blocksToText(toolResult?.content ?? []);
       }
       break;
@@ -217,6 +240,7 @@ export function foldEvent(view: SessionView, event: SessionEvent): void {
       view.plan.active = data.active === true;
       view.plan.pending = false;
       break;
+    // v1 已知取舍：compaction 替换（surfaceOp=replace）与压缩摘要渲染暂不处理，长会话视图会持续增长。
     default:
       break; // 未知事件类型（含可忽略扩展）直接跳过
   }
