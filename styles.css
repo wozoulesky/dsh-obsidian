@@ -1,0 +1,20 @@
+.dsh-chat { display: flex; flex-direction: column; height: 100%; }
+.dsh-chat-header { padding: 8px; border-bottom: 1px solid var(--background-modifier-border); }
+.dsh-chat-status { font-size: 0.85em; color: var(--text-muted); }
+.dsh-chat-messages { flex: 1 1 auto; overflow-y: auto; padding: 8px; }
+.dsh-msg-user { background: var(--background-secondary); border-radius: 8px; padding: 6px 10px; margin: 6px 0; }
+.dsh-msg-assistant { margin: 6px 0; }
+.dsh-msg-context { font-size: 0.85em; color: var(--text-muted); border-left: 2px solid var(--background-modifier-border); padding-left: 8px; margin: 4px 0; }
+.dsh-msg-command { font-size: 0.9em; color: var(--text-accent); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 4px 8px; margin: 6px 0; }
+.dsh-tool-card { border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 4px 8px; margin: 6px 0; font-size: 0.9em; }
+.dsh-tool-card summary { cursor: pointer; color: var(--text-muted); }
+.dsh-tool-result { white-space: pre-wrap; max-height: 200px; overflow-y: auto; font-family: var(--font-monospace); font-size: 0.85em; }
+.dsh-plan-banner { background: var(--color-orange); color: var(--text-on-accent); padding: 4px 10px; border-radius: 6px; margin-bottom: 6px; }
+.dsh-input-wrap { padding: 8px; border-top: 1px solid var(--background-modifier-border); position: relative; }
+.dsh-input { width: 100%; min-height: 44px; resize: vertical; }
+.dsh-suggest { position: absolute; bottom: 100%; left: 8px; right: 8px; max-height: 200px; overflow-y: auto; background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 6px; z-index: 10; }
+.dsh-suggest-item { padding: 4px 8px; cursor: pointer; }
+.dsh-suggest-item.dsh-active { background: var(--background-modifier-hover); }
+.dsh-diff-add { background: var(--background-modifier-success); }
+.dsh-diff-del { background: var(--background-modifier-error); text-decoration: line-through; }
+.dsh-diff-eq { color: var(--text-normal); }
