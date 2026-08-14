@@ -9,19 +9,61 @@ export interface InlineEditDeps {
   settings: DshSettings;
 }
 
+export type TurnState = { kind: "pending" } | { kind: "error"; message: string } | { kind: "ready"; view: SessionView };
+
+/**
+ * 依据 sinceSeq 判断一次内联编辑回合的状态：
+ * - 出现 seq > sinceSeq 的错误节点 → error（绝不能把旧结果当成新结果）
+ * - 出现 seq > sinceSeq 且已终结、有文本的 assistant 节点 → ready
+ * - 否则 pending
+ */
+export function classifyTurnState(view: SessionView | undefined, sinceSeq: number): TurnState {
+  if (!view || view.running || view.lastSeq <= sinceSeq) return { kind: "pending" };
+  for (let i = view.nodes.length - 1; i >= 0; i--) {
+    const n = view.nodes[i];
+    if (n.seq <= sinceSeq) break; // 只检查本轮产生的新节点
+    if (n.kind === "error") return { kind: "error", message: n.text };
+    if (n.kind === "assistant" && !n.streaming && n.text.length > 0) return { kind: "ready", view };
+  }
+  return { kind: "pending" };
+}
+
+/** 提取 seq > sinceSeq 的最后一个已终结 assistant 节点的文本，并剥掉可能包裹的 markdown 围栏。 */
+export function extractLastAssistantText(view: SessionView, sinceSeq: number): string {
+  for (let i = view.nodes.length - 1; i >= 0; i--) {
+    const n = view.nodes[i];
+    if (n.seq <= sinceSeq) break;
+    if (n.kind === "assistant" && !n.streaming && n.text.length > 0) {
+      let text = n.text.trim();
+      const fence = text.match(/^```[^\n]*\r?\n([\s\S]*?)\r?\n```$/);
+      if (fence) text = fence[1];
+      return text;
+    }
+  }
+  throw new Error("DSH 没有产生可用的替换文本");
+}
+
 /** 内联编辑服务：专用会话 + 只输出替换文本的指令模板 + 等待回合结束。 */
 export class InlineEditService {
   constructor(private deps: InlineEditDeps) {}
 
+  private busy = false;
+
   async edit(selection: string, notePath: string, instruction: string): Promise<string> {
-    const sessionId = await this.ensureSession();
-    const view = this.deps.store.ensureView(sessionId);
-    const sinceSeq = view.lastSeq;
-    const prompt = renderInlineEditPrompt(notePath, selection, instruction);
-    const res = await this.deps.manager.prompt(sessionId, prompt, "queue");
-    if (!res.ok) throw new Error(res.error.message);
-    const done = await this.waitForTurnEnd(sessionId, sinceSeq, this.deps.settings.values.inlineEditTimeoutSec * 1000);
-    return extractLastAssistantText(done);
+    if (this.busy) throw new Error("已有内联编辑正在进行，请稍候");
+    this.busy = true;
+    try {
+      const sessionId = await this.ensureSession();
+      const view = this.deps.store.ensureView(sessionId);
+      const sinceSeq = view.lastSeq;
+      const prompt = renderInlineEditPrompt(notePath, selection, instruction);
+      const res = await this.deps.manager.prompt(sessionId, prompt, "queue");
+      if (!res.ok) throw new Error(res.error.message);
+      const done = await this.waitForTurnEnd(sessionId, sinceSeq, this.deps.settings.values.inlineEditTimeoutSec * 1000);
+      return extractLastAssistantText(done, sinceSeq);
+    } finally {
+      this.busy = false;
+    }
   }
 
   private async ensureSession(): Promise<string> {
@@ -29,32 +71,22 @@ export class InlineEditService {
     if (stored && (await this.deps.manager.exists(stored))) return stored;
     const id = await this.deps.manager.newSession();
     this.deps.settings.values.inlineEditSessionId = id;
-    await this.deps.settings.save();
+    await this.deps.settings.save().catch(() => undefined); // 保存失败不阻塞（下次重建即可）
     return id;
   }
 
-  /** 轮询 store，直到该会话出现新回合结束且生成了终结的 assistant 文本；超时抛错。 */
+  /** 轮询 store，直到该会话的新回合出现确定性结果；错误立即抛出，超时抛错。 */
   private async waitForTurnEnd(sessionId: string, sinceSeq: number, timeoutMs: number): Promise<SessionView> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       const view = this.deps.store.getView(sessionId);
-      const lastAssistant = view ? [...view.nodes].reverse().find((n) => n.kind === "assistant") : undefined;
-      if (
-        view &&
-        !view.running &&
-        view.lastSeq > sinceSeq &&
-        lastAssistant &&
-        lastAssistant.kind === "assistant" &&
-        !lastAssistant.streaming &&
-        lastAssistant.text.length > 0
-      ) {
-        return view;
-      }
+      const state = classifyTurnState(view, sinceSeq);
+      if (state.kind === "ready") return state.view;
+      if (state.kind === "error") throw new Error(state.message);
       await sleep(500);
     }
     throw new Error(`内联编辑超时（${Math.round(timeoutMs / 1000)}s），已放弃`);
   }
-
 }
 
 export function renderInlineEditPrompt(notePath: string, selection: string, instruction: string): string {
@@ -65,20 +97,6 @@ export function renderInlineEditPrompt(notePath: string, selection: string, inst
     `<<<${selection}>>>`,
     `指令：${instruction}`,
   ].join("\n");
-}
-
-/** 提取最后一个已终结 assistant 节点的文本，并剥掉可能包裹的 markdown 围栏。 */
-export function extractLastAssistantText(view: SessionView): string {
-  for (let i = view.nodes.length - 1; i >= 0; i--) {
-    const n = view.nodes[i];
-    if (n.kind === "assistant" && !n.streaming && n.text.length > 0) {
-      let text = n.text.trim();
-      const fence = text.match(/^```[^\n]*\n([\s\S]*)\n```$/);
-      if (fence) text = fence[1];
-      return text;
-    }
-  }
-  throw new Error("DSH 没有产生可用的替换文本");
 }
 
 export function sleep(ms: number): Promise<void> {
