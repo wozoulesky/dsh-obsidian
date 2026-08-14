@@ -41,8 +41,8 @@ export class SessionStore {
     return this.views.get(sessionId);
   }
 
-  /** 返回 true 表示视图可见状态发生了变化（调用方才需要 notify）。 */
-  private applyProjection(sessionId: string, key: string, value: unknown, seq: number): boolean {
+  /** 应用一个投影单元（higher-seq-wins）；返回 true 表示视图可见状态发生了变化（调用方才需要 notify）。 */
+  applyProjection(sessionId: string, key: string, value: unknown, seq: number): boolean {
     const cells = this.projections.get(sessionId) ?? new Map<string, ProjectionCell>();
     const prev = cells.get(key);
     if (prev && prev.seq > seq) return false; // higher-seq-wins

@@ -52,11 +52,13 @@ export interface SessionView {
   plan: { active: boolean; pending: boolean };
   queueItems: unknown[];
   lastSeq: number;
+  /** 已折叠事件的最小 seq（-1 表示尚无事件）；翻页边界以此为准，避免与历史页重叠。 */
+  firstSeq: number;
   running: boolean;
 }
 
 export function createSessionView(sessionId: string): SessionView {
-  return { sessionId, nodes: [], title: null, plan: { active: false, pending: false }, queueItems: [], lastSeq: -1, running: false };
+  return { sessionId, nodes: [], title: null, plan: { active: false, pending: false }, queueItems: [], lastSeq: -1, firstSeq: -1, running: false };
 }
 
 /** 从内容块提取可见文本（text 块以空行连接）。 */
@@ -113,6 +115,7 @@ function applyChunk(node: AssistantNode, chunk: StreamChunk): void {
 /** 把一个 SessionEvent 折叠进视图模型（纯函数，原地更新 view）。 */
 export function foldEvent(view: SessionView, event: SessionEvent): void {
   if (event.seq > view.lastSeq) view.lastSeq = event.seq;
+  if (view.firstSeq === -1 || event.seq < view.firstSeq) view.firstSeq = event.seq;
   const data = event.data;
 
   switch (event.type) {

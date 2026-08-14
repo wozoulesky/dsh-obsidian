@@ -54,7 +54,7 @@ export class SessionManager {
   async newSession(): Promise<string> {
     const res = await this.client.create({ cwd: this.deps.vaultPath });
     if (!res.ok) throw new Error(res.error.message);
-    await this.refresh();
+    await this.refresh().catch(() => undefined); // 创建已成功，列表刷新失败不阻塞
     return res.value.sessionId;
   }
 
@@ -65,15 +65,19 @@ export class SessionManager {
     return res.error.code !== "session-not-found";
   }
 
+  private openEpoch = 0;
+
   /** 切换当前会话：拉取尾页历史播种视图。 */
   async openSession(sessionId: string): Promise<void> {
+    const epoch = ++this.openEpoch;
     const res = await this.client.history({ sessionId, maxMessages: this.deps.settings.values.historyPageSize });
     if (!res.ok) throw new Error(res.error.message);
+    if (epoch !== this.openEpoch) return; // 竞态守卫：期间已切换到其他会话
     this.deps.store.dropView(sessionId); // 重建干净视图再播种
     this.deps.store.seedHistory(sessionId, res.value.events);
     if (res.value.projections) {
       for (const [key, value] of Object.entries(res.value.projections.values)) {
-        if (key === "title" && typeof value === "string" && value.length > 0) this.deps.store.setTitle(sessionId, value);
+        this.deps.store.applyProjection(sessionId, key, value, res.value.projections.asOfSeq);
       }
     }
     this.currentId = sessionId;
@@ -82,9 +86,8 @@ export class SessionManager {
   /** 加载更早一页；返回是否还有更早内容。 */
   async loadOlder(sessionId: string): Promise<boolean> {
     const view = this.deps.store.ensureView(sessionId);
-    let oldest = Number.MAX_SAFE_INTEGER;
-    for (const n of view.nodes) oldest = Math.min(oldest, n.seq);
-    const beforeSeq = oldest === Number.MAX_SAFE_INTEGER ? view.lastSeq : oldest;
+    // 以已折叠事件的最小 seq 为界，避免与当前页重叠（重叠会把旧 turn 标记重新折叠进视图）
+    const beforeSeq = view.firstSeq >= 0 ? view.firstSeq : 0;
     const res = await this.client.history({ sessionId, beforeSeq, maxMessages: this.deps.settings.values.historyPageSize });
     if (!res.ok) throw new Error(res.error.message);
     this.deps.store.prependHistory(sessionId, res.value.events);

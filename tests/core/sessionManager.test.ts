@@ -28,8 +28,11 @@ beforeAll(async () => {
         value = { sessionId: "new-1" };
       } else if (url === "/api/session.history") {
         const p = body.payload as { beforeSeq?: number };
-        if (p.beforeSeq === 10) {
-          value = { events: [{ event: { type: "user/message", seq: 4, time: 4, data: { id: "m0", role: "user", content: [{ type: "text", text: "更早的消息" }], source: { kind: "user" } } } }], hasMore: false };
+        if (p.beforeSeq === 9) {
+          value = {
+            events: [{ event: { type: "user/message", seq: 4, time: 4, data: { id: "m0", role: "user", content: [{ type: "text", text: "更早的消息" }], source: { kind: "user" } } } }],
+            hasMore: false,
+          };
         } else {
           value = {
             events: [
@@ -37,6 +40,7 @@ beforeAll(async () => {
               { event: { type: "user/message", seq: 10, time: 10, data: { id: "m1", role: "user", content: [{ type: "text", text: "hi" }], source: { kind: "user" } } } },
             ],
             hasMore: true,
+            projections: { asOfSeq: 10, values: { title: "标题", plan: { active: true, pending: false } } },
           };
         }
       } else if (url === "/api/session.prompt") {
@@ -83,7 +87,9 @@ describe("SessionManager", () => {
     const { manager, store } = makeManager();
     await manager.openSession("vault-1");
     expect(manager.currentId).toBe("vault-1");
-    expect(store.ensureView("vault-1").title).toBe("标题");
+    const view = store.ensureView("vault-1");
+    expect(view.title).toBe("标题");
+    expect(view.plan).toEqual({ active: true, pending: false });
   });
 
   it("loadOlder 用最早 seq 翻页并前插", async () => {
@@ -92,6 +98,19 @@ describe("SessionManager", () => {
     const hadMore = await manager.loadOlder("vault-1");
     expect(hadMore).toBe(false);
     expect(store.ensureView("vault-1").nodes[0]).toMatchObject({ text: "更早的消息" });
+  });
+
+  it("loadOlder 翻页不破坏 running/plan 状态", async () => {
+    const { manager, store } = makeManager();
+    await manager.openSession("vault-1");
+    const before = store.ensureView("vault-1");
+    before.running = false;
+    await manager.loadOlder("vault-1");
+    const view = store.ensureView("vault-1");
+    expect(view.nodes.map((n) => (n.kind === "user" ? n.text : ""))).toEqual(["更早的消息", "hi"]);
+    expect(view.running).toBe(false);
+    expect(view.plan.active).toBe(true);
+    expect(view.firstSeq).toBe(4);
   });
 
   it("prompt/cancel 转发到 client", async () => {
