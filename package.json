@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-    "test": "vitest run"
+    "test": "vitest run",
+    "version": "node version-bump.mjs $npm_package_version && git add manifest.json versions.json package.json"
   },
   "keywords": ["obsidian", "dsh", "deepseek", "agent"],
   "license": "MIT",
