@@ -3299,13 +3299,20 @@ Run: `npm test`
 Expected: 全部 PASS。
 Run: `npm run build`
 Expected: 生成压缩版 `main.js`。
+Run: `git check-ignore main.js`
+Expected: 返回 `main.js`（dev 阶段被忽略）。
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: 将 main.js 纳入版本库并 Commit**
+
+`main.js` 被 .gitignore 排除（dev 用），但发布 artifact 必须携带它（社区插件分发只消费 release 里的 main.js + manifest.json + versions.json）。在发布提交中强制加入：
 
 ```bash
 git add README.md version-bump.mjs versions.json package.json
-git commit -m "chore: 发布准备（README、版本脚本、versions.json）"
+git add -f main.js
+git commit -m "chore: 发布准备（README、版本脚本、versions.json 与构建产物）"
 ```
+
+> 注：Task 1 代码审查确认 `.gitignore:3` 忽略 `main.js`；`git add -f` 是唯一使发布产物完整的手段。后续若接入 GitHub Actions 发布流程，应在 release 步骤中重新构建并上传 main.js（并同步强制提交）。
 
 ---
 
