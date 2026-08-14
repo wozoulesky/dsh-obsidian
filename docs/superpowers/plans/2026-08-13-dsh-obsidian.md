@@ -1769,7 +1769,7 @@ export class SessionManager {
     this.deps.store.seedHistory(sessionId, res.value.events);
     if (res.value.projections) {
       for (const [key, value] of Object.entries(res.value.projections.values)) {
-        if (key === "title" && typeof value === "string" && value.length > 0) this.deps.store.ensureView(sessionId).title = value;
+        if (key === "title" && typeof value === "string" && value.length > 0) this.deps.store.setTitle(sessionId, value);
       }
     }
     this.currentId = sessionId;
@@ -1783,13 +1783,7 @@ export class SessionManager {
     const beforeSeq = oldest === Number.MAX_SAFE_INTEGER ? view.lastSeq : oldest;
     const res = await this.client.history({ sessionId, beforeSeq, maxMessages: this.deps.settings.values.historyPageSize });
     if (!res.ok) throw new Error(res.error.message);
-    // 前插：重建视图，先折叠旧页再折叠现有页。
-    const current = view.nodes;
-    this.deps.store.dropView(sessionId);
-    this.deps.store.seedHistory(sessionId, res.value.events);
-    const merged = this.deps.store.ensureView(sessionId);
-    // 用保留的现有节点重新折叠（按 seq 重放，简单起见直接重建 nodes 顺序）
-    merged.nodes = [...merged.nodes, ...current];
+    this.deps.store.prependHistory(sessionId, res.value.events);
     return res.value.hasMore;
   }
 
