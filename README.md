@@ -2,6 +2,8 @@
 
 把本地运行的 [DeepSeek Harness (DSH)](https://www.npmjs.com/package/@deepseek-ai/dsh) 作为 AI 协作者嵌入 Obsidian：vault 就是它的工作目录，DSH 可以直接读、写、搜索你的笔记。
 
+[English](./README.en.md)
+
 ## 前置条件
 
 - 本机运行中的 DSH 服务（默认 `http://127.0.0.1:3080`）
