@@ -1,6 +1,7 @@
 import { App, ItemView, MarkdownRenderer, Modal, Notice, Setting, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { DshInputBox } from "./inputBox";
 import { resolveMentions, truncate } from "./prompts";
+import { clearTimer, setTimer } from "../utils/timers";
 import type { DshRuntime } from "../main";
 import type { SessionView, ViewNode } from "../core/eventFold";
 import type { PendingApproval, PendingQuestion } from "../core/approvalCenter";
@@ -73,7 +74,7 @@ export class DshChatView extends ItemView {
 
   async onClose(): Promise<void> {
     if (this.renderTimer) {
-      clearTimeout(this.renderTimer);
+      clearTimer(this.renderTimer);
       this.renderTimer = null;
     }
     for (const dispose of this.disposers) dispose();
@@ -149,20 +150,24 @@ export class DshChatView extends ItemView {
       if (select.value) void this.open(select.value);
     });
     const newBtn = row.createEl("button", { text: "新建" });
-    newBtn.addEventListener("click", async () => {
-      try {
-        const id = await this.runtime.manager.newSession();
-        await this.open(id);
-      } catch (err) {
-        new Notice(`新建会话失败：${err instanceof Error ? err.message : String(err)}`);
-      }
+    newBtn.addEventListener("click", () => {
+      void (async () => {
+        try {
+          const id = await this.runtime.manager.newSession();
+          await this.open(id);
+        } catch (err) {
+          new Notice(`新建会话失败：${err instanceof Error ? err.message : String(err)}`);
+        }
+      })();
     });
     const stopBtn = row.createEl("button", { text: "停止" });
-    stopBtn.addEventListener("click", async () => {
-      if (this.runtime.manager.currentId) {
-        const res = await this.runtime.manager.cancel(this.runtime.manager.currentId);
-        if (!res.ok) new Notice(`停止失败：${res.error.message}`);
-      }
+    stopBtn.addEventListener("click", () => {
+      void (async () => {
+        if (this.runtime.manager.currentId) {
+          const res = await this.runtime.manager.cancel(this.runtime.manager.currentId);
+          if (!res.ok) new Notice(`停止失败：${res.error.message}`);
+        }
+      })();
     });
   }
 
@@ -177,7 +182,7 @@ export class DshChatView extends ItemView {
     if (now - this.lastRenderAt < 150) {
       if (!this.renderPending) {
         this.renderPending = true;
-        this.renderTimer = setTimeout(() => {
+        this.renderTimer = setTimer(() => {
           this.renderPending = false;
           this.renderTimer = null;
           this.renderNow();
@@ -202,13 +207,15 @@ export class DshChatView extends ItemView {
       return;
     }
     const olderBtn = this.msgEl.createEl("button", { text: "加载更早" });
-    olderBtn.addEventListener("click", async () => {
-      try {
-        await this.runtime.manager.loadOlder(view.sessionId);
-        this.renderNow();
-      } catch (err) {
-        new Notice(`加载失败：${err instanceof Error ? err.message : String(err)}`);
-      }
+    olderBtn.addEventListener("click", () => {
+      void (async () => {
+        try {
+          await this.runtime.manager.loadOlder(view.sessionId);
+          this.renderNow();
+        } catch (err) {
+          new Notice(`加载失败：${err instanceof Error ? err.message : String(err)}`);
+        }
+      })();
     });
     for (const node of view.nodes) this.renderNode(node);
     if (view.running) this.msgEl.createDiv({ cls: "dsh-chat-status", text: "⏳ DSH 正在工作…" });

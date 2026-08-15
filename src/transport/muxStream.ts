@@ -1,5 +1,6 @@
 import WebSocket from "ws";
 import type { MuxFrame, ServerRequest } from "./types";
+import { clearTimer, setTimer } from "../utils/timers";
 
 export type MuxState = "connected" | "reconnecting";
 
@@ -45,7 +46,7 @@ export class MuxStream {
     this.lastState = null;
     this.attempt = 0;
     if (this.timer) {
-      clearTimeout(this.timer);
+      clearTimer(this.timer);
       this.timer = null;
     }
     this.connect();
@@ -89,7 +90,7 @@ export class MuxStream {
     this.emitState("reconnecting");
     this.attempt += 1;
     const delay = backoffDelay(this.attempt, this.backoffBaseMs, this.backoffMaxMs);
-    this.timer = setTimeout(() => {
+    this.timer = setTimer(() => {
       if (!this.stopped) this.connect();
     }, delay);
   }
@@ -104,7 +105,7 @@ export class MuxStream {
   stop(): void {
     this.stopped = true;
     if (this.timer) {
-      clearTimeout(this.timer);
+      clearTimer(this.timer);
       this.timer = null;
     }
     this.socket?.close();

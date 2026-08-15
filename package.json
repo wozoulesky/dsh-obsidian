@@ -9,7 +9,12 @@
     "test": "vitest run",
     "version": "node version-bump.mjs $npm_package_version && git add manifest.json versions.json package.json"
   },
-  "keywords": ["obsidian", "dsh", "deepseek", "agent"],
+  "keywords": [
+    "obsidian",
+    "dsh",
+    "deepseek",
+    "agent"
+  ],
   "license": "MIT",
   "dependencies": {
     "ws": "^8.18.0"
@@ -17,7 +22,6 @@
   "devDependencies": {
     "@types/node": "^20.14.0",
     "@types/ws": "^8.5.10",
-    "builtin-modules": "^3.3.0",
     "esbuild": "^0.21.0",
     "obsidian": "^1.7.2",
     "typescript": "^5.4.0",

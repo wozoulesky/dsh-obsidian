@@ -19,7 +19,9 @@ export class DshInputBox {
   ) {
     this.wrap = container.createDiv({ cls: "dsh-input-wrap" });
     this.textarea = this.wrap.createEl("textarea", { cls: "dsh-input", attr: { placeholder: "给 DSH 发任务…（/ 命令，@ 提及文件，Shift+Tab 计划模式）" } });
-    this.textarea.addEventListener("keydown", (e) => this.onKeydown(e));
+    this.textarea.addEventListener("keydown", (e) => {
+      void this.onKeydown(e);
+    });
     this.textarea.addEventListener("input", () => this.updateSuggest());
   }
 

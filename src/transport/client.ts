@@ -1,5 +1,6 @@
 import * as http from "http";
-import { mintId, isServerResponse, type ClientRequest, type ClientResponse, type RpcResult, type RpcReceipt, type ServerResponse, type HistoryPayload, type HistoryResult, type PromptPayload, type PromptResult, type SessionCreatePayload, type SessionCreateResult, type SessionListResult, type CancelPayload, type CancelResult } from "./types";
+import { mintId, isServerResponse, type ClientRequest, type ClientResponse, type RpcResult, type RpcReceipt, type HistoryPayload, type HistoryResult, type PromptPayload, type PromptResult, type SessionCreatePayload, type SessionCreateResult, type SessionListResult, type CancelPayload, type CancelResult } from "./types";
+import { clearTimer, setTimer } from "../utils/timers";
 
 export class TransportFailure extends Error {
   constructor(message: string, readonly cause?: unknown) {
@@ -18,7 +19,7 @@ export function postJson(url: string, body: string, timeoutMs: number): Promise<
       settled = true;
       reject(err);
     };
-    const deadline = setTimeout(() => fail(new TransportFailure(`timeout after ${timeoutMs}ms`)), timeoutMs);
+    const deadline = setTimer(() => fail(new TransportFailure(`timeout after ${timeoutMs}ms`)), timeoutMs);
     const req = http.request(
       {
         hostname: u.hostname,
@@ -36,7 +37,7 @@ export function postJson(url: string, body: string, timeoutMs: number): Promise<
         res.on("end", () => {
           if (settled) return;
           settled = true;
-          clearTimeout(deadline);
+          clearTimer(deadline);
           const text = Buffer.concat(chunks).toString("utf8");
           if (res.statusCode !== undefined && res.statusCode >= 200 && res.statusCode < 300) {
             resolve(text);
@@ -51,7 +52,7 @@ export function postJson(url: string, body: string, timeoutMs: number): Promise<
     );
     req.setTimeout(timeoutMs, () => req.destroy(new TransportFailure(`timeout after ${timeoutMs}ms`)));
     req.on("error", (err) => {
-      clearTimeout(deadline);
+      clearTimer(deadline);
       fail(new TransportFailure(err.message, err));
     });
     req.write(body);

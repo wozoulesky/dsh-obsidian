@@ -2,6 +2,7 @@ import { SessionManager } from "./sessionManager";
 import { SessionStore } from "./store";
 import { DshSettings } from "../settings";
 import type { SessionView } from "./eventFold";
+import { setTimer } from "../utils/timers";
 
 export interface InlineEditDeps {
   manager: SessionManager;
@@ -103,5 +104,5 @@ export function renderInlineEditPrompt(notePath: string, selection: string, inst
 }
 
 export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimer(resolve, ms));
 }

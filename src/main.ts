@@ -117,7 +117,7 @@ export default class DshPlugin extends Plugin {
       await right.setViewState({ type: VIEW_TYPE_DSH_CHAT, active: true });
       leaf = right;
     }
-    workspace.revealLeaf(leaf);
+    await workspace.revealLeaf(leaf);
   }
 
   onunload(): void {
