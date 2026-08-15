@@ -50,8 +50,7 @@ export function isServerResponse(x: unknown): x is ServerResponse {
 /** 浏览器安全 UUID v4（不依赖 secure context，Electron 渲染进程可用）。 */
 export function mintId(): string {
   const bytes = new Uint8Array(16);
-  const cryptoObj = typeof window !== "undefined" ? window.crypto : globalThis.crypto;
-  cryptoObj.getRandomValues(bytes);
+  window.crypto.getRandomValues(bytes);
   bytes[6] = (bytes[6] & 0x0f) | 0x40;
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
   const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");

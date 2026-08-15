@@ -117,9 +117,10 @@ export class DshChatView extends ItemView {
     if (abs instanceof TFolder) {
       return { kind: "folder", text: (await this.listTree(path, 0)).join("\n") };
     }
+    if (!(abs instanceof TFile)) return null;
     try {
       // 读取走 Vault API（官方指引优先于 Adapter API：缓存与串行化保证）
-      return { kind: "file", text: await this.runtime.plugin.app.vault.cachedRead(abs as TFile) };
+      return { kind: "file", text: await this.runtime.plugin.app.vault.cachedRead(abs) };
     } catch {
       return null;
     }
