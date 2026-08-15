@@ -1,40 +1,40 @@
-# DSH for Obsidian
+# DSH Bridge
 
-把本地运行的 [DeepSeek Harness (DSH)](https://www.npmjs.com/package/@deepseek-ai/dsh) 作为 AI 协作者嵌入 Obsidian：vault 就是它的工作目录，DSH 可以直接读、写、搜索你的笔记。
+Embed your locally running [DeepSeek Harness (DSH)](https://www.npmjs.com/package/@deepseek-ai/dsh) into Obsidian as an AI collaborator: your vault becomes its working directory, and DSH can read, write, and search your notes directly.
 
-[English](./README.en.md)
+[中文文档](./README.zh.md)
 
-## 前置条件
+## Prerequisites
 
-- 本机运行中的 DSH 服务（默认 `http://127.0.0.1:3080`）
-- 你的 vault 位于 DSH 可访问的目录范围（DSH 沙箱/工作区配置决定）
-- Obsidian ≥ 1.7.2，仅桌面端
+- A running DSH instance on your machine (default `http://127.0.0.1:3080`)
+- Your vault must be inside DSH's accessible directory scope (decided by DSH's sandbox / workspace config)
+- Obsidian ≥ 1.7.2, desktop only
 
-## 功能
+## Features
 
-- **聊天侧边栏**：流式回复、工具调用卡片、审批/提问弹窗、会话切换与新建
-- **内联编辑**：选中文本 + 热键（在 Obsidian 设置中分配）→ 指令 → 词级 diff 预览 → 替换
-- **@提及文件**：输入 `@` 选择 vault 文件，内容注入上下文
-- **斜杠命令与计划模式**：`/plan`、`/compact`、`/feedback`、`/goal`；`Shift+Tab` 切换计划模式
+- **Chat sidebar** — streamed responses, tool-call cards, approval/question popups (retryable), session switching and creation, "load older" pagination, and automatic re-sync after reconnects
+- **Inline edit** — select text + hotkey → instruction → word-level diff preview → apply (editor selection is re-validated before applying; large selections degrade to a plain confirm dialog)
+- **@mentions** — type `@` to pick vault files (`@file:path`, content injected) or folders (`@folder:path`, directory tree injected), with truncation and missing-file notices
+- **Slash commands & plan mode** — `/plan`, `/compact`, `/feedback`, `/goal` with autocomplete; `Shift+Tab` toggles plan mode with a status banner
 
-## 安装（本地）
+## Installation (local)
 
 1. `npm install && npm run build`
-2. 把 `main.js`、`manifest.json`、`styles.css` 复制到 `vault/.obsidian/plugins/dsh-bridge/`
-3. 设置 → 第三方插件 → 启用「DSH for Obsidian」
+2. Copy `main.js`, `manifest.json`, and `styles.css` into `vault/.obsidian/plugins/dsh-bridge/`
+3. Settings → Community plugins → enable "DSH Bridge"
 
-## 隐私
+## Privacy
 
-所有数据经本地 DSH 转发到其配置的模型供应商，与 DSH Web GUI 使用同一策略。插件本身不发送任何遥测。
+All data flows through your local DSH to its configured model providers, using the same policy as the DSH Web GUI. The plugin sends no telemetry.
 
-## 开发
+## Development
 
 ```bash
 npm install
-npm run dev    # 监听构建
-npm test       # 单元测试
+npm run dev    # watch build
+npm test       # unit tests (74)
 ```
 
-## 架构
+## Architecture
 
-传输层：一元 RPC 走 Node `http`（`POST /api/<method>`、`/api/respond`）；事件流走 `ws` WebSocket（`/api/events.mux`，服务端拒绝 SSE）。核心层把会话事件折叠为视图模型；UI 层渲染侧边栏与弹窗。详见 `docs/superpowers/specs/2026-08-13-dsh-obsidian-design.md`。
+Transport: unary RPC over Node `http` (`POST /api/<method>`, `/api/respond`); live events over a bundled `ws` WebSocket (`/api/events.mux` — the server rejects plain SSE with 426). A core layer folds session events into view models; a UI layer renders the sidebar and modals. See `docs/superpowers/specs/2026-08-13-dsh-obsidian-design.md`.
