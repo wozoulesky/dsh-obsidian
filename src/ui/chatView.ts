@@ -1,4 +1,4 @@
-import { App, ItemView, MarkdownRenderer, Modal, Notice, Setting, TFolder, WorkspaceLeaf } from "obsidian";
+import { App, ItemView, MarkdownRenderer, Modal, Notice, Setting, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { DshInputBox } from "./inputBox";
 import { resolveMentions, truncate } from "./prompts";
 import type { DshRuntime } from "../main";
@@ -117,7 +117,8 @@ export class DshChatView extends ItemView {
       return { kind: "folder", text: (await this.listTree(path, 0)).join("\n") };
     }
     try {
-      return { kind: "file", text: await this.runtime.plugin.app.vault.adapter.read(path) };
+      // 读取走 Vault API（官方指引优先于 Adapter API：缓存与串行化保证）
+      return { kind: "file", text: await this.runtime.plugin.app.vault.cachedRead(abs as TFile) };
     } catch {
       return null;
     }
