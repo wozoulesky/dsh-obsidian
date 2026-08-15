@@ -1,6 +1,6 @@
 {
-  "id": "dsh-obsidian",
-  "name": "DSH for Obsidian",
+  "id": "dsh-bridge",
+  "name": "DSH Bridge",
   "version": "0.1.0",
   "minAppVersion": "1.7.2",
   "description": "Embed your local DeepSeek Harness (DSH) agent in Obsidian to chat, edit, and manage notes in your vault.",

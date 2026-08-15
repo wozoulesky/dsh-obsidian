@@ -63,7 +63,7 @@ export default class DshPlugin extends Plugin {
             const inlineId = this.settings.values.inlineEditSessionId;
             if (inlineId && store.getView(inlineId)) targets.add(inlineId);
             for (const id of targets) {
-              manager.resyncSession(id).catch((err) => console.error("[dsh-obsidian] 重连同步失败:", err));
+              manager.resyncSession(id).catch((err) => console.error("[dsh-bridge] 重连同步失败:", err));
             }
           })();
         }
@@ -98,7 +98,7 @@ export default class DshPlugin extends Plugin {
     this.addSettingTab(new DshSettingTab(this.app, this));
 
     mux.start();
-    manager.refresh().catch((err) => console.error("[dsh-obsidian] 会话列表拉取失败:", err));
+    manager.refresh().catch((err) => console.error("[dsh-bridge] 会话列表拉取失败:", err));
   }
 
   vaultPath(): string {

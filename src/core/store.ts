@@ -23,7 +23,7 @@ export class SessionStore {
       try {
         l();
       } catch (err) {
-        console.error("[dsh-obsidian] store 监听器异常:", err);
+        console.error("[dsh-bridge] store 监听器异常:", err);
       }
     }
   }

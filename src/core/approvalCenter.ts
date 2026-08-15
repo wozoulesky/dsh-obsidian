@@ -34,7 +34,7 @@ export class ApprovalCenter {
       try {
         l();
       } catch (err) {
-        console.error("[dsh-obsidian] approval 监听器异常:", err);
+        console.error("[dsh-bridge] approval 监听器异常:", err);
       }
     }
   }

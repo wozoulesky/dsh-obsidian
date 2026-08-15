@@ -65,17 +65,17 @@ export class MuxStream {
       try {
         msg = JSON.parse(data.toString()) as ServerRequest;
       } catch (err) {
-        console.error("[dsh-obsidian] 丢弃非法 mux 帧:", err);
+        console.error("[dsh-bridge] 丢弃非法 mux 帧:", err);
         return;
       }
       if (typeof msg?.rpcId !== "string" || typeof msg?.payload !== "object" || msg?.payload === null) {
-        console.error("[dsh-obsidian] 丢弃结构非法的 mux 帧:", JSON.stringify(msg));
+        console.error("[dsh-bridge] 丢弃结构非法的 mux 帧:", JSON.stringify(msg));
         return;
       }
       try {
         this.sink.onFrame(msg.rpcId, msg.payload as MuxFrame);
       } catch (err) {
-        console.error("[dsh-obsidian] mux 帧处理回调异常（帧已丢弃，流继续）:", err);
+        console.error("[dsh-bridge] mux 帧处理回调异常（帧已丢弃，流继续）:", err);
       }
     });
     socket.on("close", () => this.scheduleReconnect());

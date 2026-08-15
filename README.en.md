@@ -20,7 +20,7 @@ Embed your locally running [DeepSeek Harness (DSH)](https://www.npmjs.com/packag
 ## Installation (local)
 
 1. `npm install && npm run build`
-2. Copy `main.js`, `manifest.json`, and `styles.css` into `vault/.obsidian/plugins/dsh-obsidian/`
+2. Copy `main.js`, `manifest.json`, and `styles.css` into `vault/.obsidian/plugins/dsh-bridge/`
 3. Settings → Community plugins → enable "DSH for Obsidian"
 
 ## Privacy

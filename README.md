@@ -20,7 +20,7 @@
 ## 安装（本地）
 
 1. `npm install && npm run build`
-2. 把 `main.js`、`manifest.json`、`styles.css` 复制到 `vault/.obsidian/plugins/dsh-obsidian/`
+2. 把 `main.js`、`manifest.json`、`styles.css` 复制到 `vault/.obsidian/plugins/dsh-bridge/`
 3. 设置 → 第三方插件 → 启用「DSH for Obsidian」
 
 ## 隐私
