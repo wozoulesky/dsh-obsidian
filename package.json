@@ -1,6 +1,6 @@
 {
   "name": "dsh-obsidian",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "把 DeepSeek Harness (DSH) 嵌入 Obsidian：聊天侧边栏、内联编辑、@提及与斜杠命令",
   "main": "main.js",
   "scripts": {
