@@ -61,7 +61,7 @@ export class DshSettingTab extends PluginSettingTab {
       if (!Number.isFinite(n) || n <= 0) return;
       values[key] = Math.floor(n);
     } else {
-      values[key] = typeof value === "string" ? (value as string).trim() : value;
+      values[key] = typeof value === "string" ? value.trim() : value;
     }
     void this.plugin.settings.save();
   }
