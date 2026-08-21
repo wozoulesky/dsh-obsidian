@@ -148,6 +148,8 @@ export class DshInputBox {
     this.suggestEl?.remove();
     this.suggestEl = null;
     this.suggestKind = null;
-    this.suggestItems = [];
+    // 注意：不能清空 suggestItems/suggestIndex —— renderSuggest 渲染时依赖它们；
+    // 旧实现先 closeSuggest 再 forEach 导致列表永远为空（弹窗从不出项）。
+    // 列表由 updateSuggest 在每次输入时整体替换。
   }
 }
