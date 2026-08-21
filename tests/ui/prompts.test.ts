@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BUILTIN_COMMANDS, collectMentionPaths, resolveMentions, truncate } from "../../src/ui/prompts";
+import { BUILTIN_COMMANDS, collectMentionPaths, matchSuggestToken, resolveMentions, truncate } from "../../src/ui/prompts";
 
 describe("BUILTIN_COMMANDS", () => {
   it("包含 /plan 且所有命令以 / 开头", () => {
@@ -44,6 +44,26 @@ describe("resolveMentions", () => {
 
   it("collectMentionPaths 同时捕获 file 与 folder 标记", () => {
     expect(collectMentionPaths("@file:a.md @folder:notes")).toEqual(["a.md", "notes"]);
+  });
+});
+
+describe("matchSuggestToken", () => {
+  it("输入框光标前 @ 触发提及联想（含空查询）", () => {
+    expect(matchSuggestToken("@")).toEqual({ kind: "mention", query: "" });
+    expect(matchSuggestToken("和 @")).toEqual({ kind: "mention", query: "" });
+    expect(matchSuggestToken("@测")).toEqual({ kind: "mention", query: "测" });
+    expect(matchSuggestToken("@file:a.md")).toEqual({ kind: "mention", query: "a.md" });
+  });
+
+  it("/ 触发命令联想", () => {
+    expect(matchSuggestToken("/")).toEqual({ kind: "slash", query: "" });
+    expect(matchSuggestToken("/pl")).toEqual({ kind: "slash", query: "pl" });
+  });
+
+  it("无 token（正文/结尾空格）返回 null", () => {
+    expect(matchSuggestToken("你好")).toBeNull();
+    expect(matchSuggestToken("对比 @file:a.md 和 ")).toBeNull();
+    expect(matchSuggestToken("")).toBeNull();
   });
 });
 

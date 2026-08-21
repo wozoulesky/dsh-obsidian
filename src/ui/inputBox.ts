@@ -1,4 +1,4 @@
-import { BUILTIN_COMMANDS } from "./prompts";
+import { BUILTIN_COMMANDS, matchSuggestToken } from "./prompts";
 import type { DshRuntime } from "../main";
 import type { SessionView } from "../core/eventFold";
 
@@ -15,7 +15,8 @@ export class DshInputBox {
     private container: HTMLElement,
     private runtime: DshRuntime,
     private getView: () => SessionView | undefined,
-    private onSend: (text: string) => Promise<void>
+    private onSend: (text: string) => Promise<boolean>,
+    private onPlanToggle: (active: boolean) => void
   ) {
     this.wrap = container.createDiv({ cls: "dsh-input-wrap" });
     this.textarea = this.wrap.createEl("textarea", { cls: "dsh-input", attr: { placeholder: "给 DSH 发任务…（/ 命令，@ 提及文件，Shift+Tab 计划模式）" } });
@@ -71,30 +72,33 @@ export class DshInputBox {
   private async togglePlan(): Promise<void> {
     const view = this.getView();
     if (!view) return;
-    const target = view.plan.active ? "/plan off" : "/plan";
-    view.plan.pending = true; // 本地兜底：投影帧到达时（higher-seq-wins）覆盖为权威值
-    await this.onSend(target);
+    const target = !view.plan.active;
+    view.plan.pending = true; // 本地乐观标记；服务端 rc.6 不推送 plan 状态帧，不能依赖投影回执
+    const ok = await this.onSend(target ? "/plan" : "/plan off");
+    if (ok) {
+      this.onPlanToggle(target); // 发送成功即显示切换结果，避免「切换中」永久卡住
+    } else {
+      view.plan.pending = false; // 失败回滚（onSend 内已提示）
+    }
   }
 
   private updateSuggest(): void {
     const value = this.textarea.value;
     const cursor = this.textarea.selectionStart ?? value.length;
     const before = value.slice(0, cursor);
-    const tokenMatch = before.match(/(?:^|\s)(@(?:file|folder):([^\s@]*)|@([^\s@/]*)|(\/)([^\s@/]*))$/);
-    if (!tokenMatch) {
+    const token = matchSuggestToken(before);
+    if (!token) {
       this.closeSuggest();
       return;
     }
-    const kind = tokenMatch[1].startsWith("@") ? "mention" : "slash";
-    const query = (kind === "mention" ? (tokenMatch[2] ?? tokenMatch[3]) : tokenMatch[5] ?? "").toLowerCase();
-    const items = kind === "slash"
-      ? BUILTIN_COMMANDS.filter((c) => c.name.startsWith(query)).map((c) => `${c.name} — ${c.description}`)
-      : this.mentionCandidates(query).slice(0, 20);
+    const items = token.kind === "slash"
+      ? BUILTIN_COMMANDS.filter((c) => c.name.startsWith(token.query)).map((c) => `${c.name} — ${c.description}`)
+      : this.mentionCandidates(token.query).slice(0, 20);
     if (items.length === 0) {
       this.closeSuggest();
       return;
     }
-    this.suggestKind = kind;
+    this.suggestKind = token.kind;
     this.suggestItems = items;
     this.suggestIndex = 0;
     this.renderSuggest();

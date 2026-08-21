@@ -30,6 +30,15 @@ export function truncate(text: string, max: number): string {
   return text.slice(0, max) + "…";
 }
 
+/** 依据光标前文本解析联想 token（@ 提及 / / 命令）；返回 null 表示无联想。 */
+export function matchSuggestToken(before: string): { kind: "mention" | "slash"; query: string } | null {
+  const m = before.match(/(?:^|\s)(@(?:file|folder):([^\s@]*)|@([^\s@/]*)|(\/)([^\s@/]*))$/);
+  if (!m) return null;
+  const kind: "mention" | "slash" = m[1].startsWith("@") ? "mention" : "slash";
+  const query = (kind === "mention" ? (m[2] ?? m[3]) : m[5] ?? "").toLowerCase();
+  return { kind, query };
+}
+
 /** 替换文本中所有出现的标记（String.replace 遇字符串模式只替换首次，同一路径提及多次必须全量替换）。 */
 function replaceAll(text: string, search: string, replacement: string): string {
   return text.split(search).join(replacement);

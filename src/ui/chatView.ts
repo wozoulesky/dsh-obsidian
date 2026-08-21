@@ -50,7 +50,7 @@ export class DshChatView extends ItemView {
     this.renderHeader();
     this.planEl = contentEl.createDiv();
     this.msgEl = contentEl.createDiv({ cls: "dsh-chat-messages" });
-    this.input = new DshInputBox(contentEl, this.runtime, () => this.view, (text) => this.send(text));
+    this.input = new DshInputBox(contentEl, this.runtime, () => this.view, (text) => this.send(text), (active) => this.applyPlanToggle(active));
 
     this.disposers.push(this.runtime.store.onChange(() => this.render()));
     this.disposers.push(
@@ -98,11 +98,20 @@ export class DshChatView extends ItemView {
     }
   }
 
-  private async send(text: string): Promise<void> {
+  /** Shift+Tab 切换成功后的本地乐观状态：rc.6 服务端不发送 plan 状态帧，按发送结果显示。 */
+  private applyPlanToggle(active: boolean): void {
+    const view = this.view;
+    if (!view) return;
+    view.plan.active = active;
+    view.plan.pending = false;
+    this.renderNow();
+  }
+
+  private async send(text: string): Promise<boolean> {
     const sessionId = this.runtime.manager.currentId;
     if (!sessionId) {
       new Notice("请先创建会话");
-      return;
+      return false;
     }
     const clearPendingPlan = (): void => {
       const view = this.view;
@@ -117,10 +126,13 @@ export class DshChatView extends ItemView {
       if (!res.ok) {
         new Notice(`发送失败：${res.error.message}`);
         clearPendingPlan(); // 服务端拒绝时本地 pending 标记要回滚，否则「计划模式切换中…」永久卡住
+        return false;
       }
+      return true;
     } catch (err) {
       new Notice(`发送失败：${err instanceof Error ? err.message : String(err)}`);
       clearPendingPlan();
+      return false;
     }
   }
 
