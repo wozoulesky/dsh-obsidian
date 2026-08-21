@@ -30,6 +30,12 @@ export function truncate(text: string, max: number): string {
   return text.slice(0, max) + "…";
 }
 
+/** 按查询过滤内置命令（query 不带 "/"，如 "com" 匹配 /compact）。 */
+export function filterBuiltinCommands(query: string): BuiltinCommand[] {
+  const lower = query.toLowerCase();
+  return BUILTIN_COMMANDS.filter((c) => c.name.slice(1).startsWith(lower));
+}
+
 /** 依据光标前文本解析联想 token（@ 提及 / / 命令）；返回 null 表示无联想。 */
 export function matchSuggestToken(before: string): { kind: "mention" | "slash"; query: string } | null {
   const m = before.match(/(?:^|\s)(@(?:file|folder):([^\s@]*)|@([^\s@/]*)|(\/)([^\s@/]*))$/);

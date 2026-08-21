@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BUILTIN_COMMANDS, collectMentionPaths, matchSuggestToken, resolveMentions, truncate } from "../../src/ui/prompts";
+import { BUILTIN_COMMANDS, collectMentionPaths, filterBuiltinCommands, matchSuggestToken, resolveMentions, truncate } from "../../src/ui/prompts";
 
 describe("BUILTIN_COMMANDS", () => {
   it("包含 /plan 且所有命令以 / 开头", () => {
@@ -44,6 +44,15 @@ describe("resolveMentions", () => {
 
   it("collectMentionPaths 同时捕获 file 与 folder 标记", () => {
     expect(collectMentionPaths("@file:a.md @folder:notes")).toEqual(["a.md", "notes"]);
+  });
+});
+
+describe("filterBuiltinCommands", () => {
+  it("按命令名过滤（忽略前导 /，不区分大小写）", () => {
+    expect(filterBuiltinCommands("com").map((c) => c.name)).toEqual(["/compact"]);
+    expect(filterBuiltinCommands("pl").map((c) => c.name)).toContain("/plan");
+    expect(filterBuiltinCommands("").map((c) => c.name)).toEqual(BUILTIN_COMMANDS.map((c) => c.name));
+    expect(filterBuiltinCommands("xyz")).toEqual([]);
   });
 });
 

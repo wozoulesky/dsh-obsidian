@@ -1,4 +1,4 @@
-import { BUILTIN_COMMANDS, matchSuggestToken } from "./prompts";
+import { filterBuiltinCommands, matchSuggestToken } from "./prompts";
 import type { DshRuntime } from "../main";
 import type { SessionView } from "../core/eventFold";
 
@@ -49,6 +49,11 @@ export class DshInputBox {
         this.acceptSuggest();
         return;
       }
+      if (e.key === "Tab" && !e.shiftKey) {
+        e.preventDefault();
+        this.acceptSuggest();
+        return;
+      }
       if (e.key === "Escape") {
         this.closeSuggest();
         return;
@@ -92,7 +97,7 @@ export class DshInputBox {
       return;
     }
     const items = token.kind === "slash"
-      ? BUILTIN_COMMANDS.filter((c) => c.name.startsWith(token.query)).map((c) => `${c.name} — ${c.description}`)
+      ? filterBuiltinCommands(token.query).map((c) => `${c.name} — ${c.description}`)
       : this.mentionCandidates(token.query).slice(0, 20);
     if (items.length === 0) {
       this.closeSuggest();
