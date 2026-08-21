@@ -175,4 +175,4 @@ src/
 - **推理模型语义**：assistant 消息仅含 reasoning 块（无 text、无工具调用）时，把 thinking 提升为可见文本（`assistant/message` 与 `turn/end` 双兜底）——与 harness UI"think 即回复"一致。
 - **内联编辑回合判定**：新增 `lastTurnStartSeq`（turn/start 记录），仅当本回合开始后才判定 ready/error，防止超时前的旧回合收尾被误判为本轮结果。
 - **联想弹窗**：`closeSuggest` 不得清空 `suggestItems`（渲染源），列表由每次输入整体替换；`/` 命令过滤需去掉前导 `/`。
-- **发布规范**：release tag 与 manifest 版本一致（不带 `v`）；资产含 `main.js`、`manifest.json`、`styles.css`、`{id}-{version}.tgz`。
+- **发布规范**：release tag 与 manifest 版本一致（不带 `v`）；资产含 `main.js`、`manifest.json`、`styles.css`、`{id}-{version}.tgz`；构建 banner 固定（不内嵌时间戳）保证**产物可复现**（社区审核会从源码重建并字节比对）。
