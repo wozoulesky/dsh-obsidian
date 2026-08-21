@@ -135,7 +135,13 @@ export function foldEvent(view: SessionView, event: SessionEvent): void {
         view.nodes.push({ kind: "error", id: `err-${event.seq}`, text: `回合错误：${reason.error?.message ?? "未知错误"}`, seq: event.seq });
       }
       const node = lastAssistant(view);
-      if (node) node.streaming = false;
+      if (node) {
+        node.streaming = false;
+        // 流式收尾兜底：turn 结束仍无 text 块但 thinking 有内容（推理模型答案在 think 里）
+        if (node.text.length === 0 && node.reasoning.length > 0 && node.toolCards.length === 0) {
+          node.text = node.reasoning;
+        }
+      }
       break;
     }
     case "user/message": {
@@ -191,6 +197,11 @@ export function foldEvent(view: SessionView, event: SessionEvent): void {
         if (!target.toolCards.some((c) => c.id === call.id)) {
           target.toolCards.push({ id: call.id, name: call.name, args: call.arguments, status: "running" });
         }
+      }
+      // 推理模型可能把最终答案整体写在 thinking 里（content 只有 reasoning 块、无 text 块）。
+      // 与 harness UI 语义一致：此时 thinking 就是可见回复——否则聊天/内联编辑会得到空文本。
+      if (target.text.length === 0 && target.reasoning.length > 0 && target.toolCards.length === 0) {
+        target.text = target.reasoning;
       }
       break;
     }

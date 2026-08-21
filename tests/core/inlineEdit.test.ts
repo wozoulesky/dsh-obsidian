@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { classifyTurnState, extractLastAssistantText, renderInlineEditPrompt, sleep } from "../../src/core/inlineEdit";
-import { createSessionView } from "../../src/core/eventFold";
+import { createSessionView, foldEvent } from "../../src/core/eventFold";
 
 describe("renderInlineEditPrompt", () => {
   it("包含路径、选区与指令", () => {
@@ -106,5 +106,27 @@ describe("classifyTurnState", () => {
     view.lastTurnEndSeq = 5;
     const state = classifyTurnState(view, 0);
     expect(state.kind).toBe("error");
+  });
+
+  it("推理模型答案写在 thinking 里（真实线上形状）时全链路可判 ready 并提取文本", () => {
+    const view = createSessionView("s");
+    const ev = (type: string, seq: number, data: Record<string, unknown>) => ({ type, seq, time: seq * 1000, data });
+    foldEvent(view, ev("turn/start", 10, { turn: 1 }));
+    foldEvent(view, ev("assistant/message", 11, {
+      turn: 1,
+      step: 1,
+      message: {
+        id: "am1",
+        role: "assistant",
+        content: [{ type: "reasoning", text: "简单输出即可。成功。" }],
+        source: { kind: "model", provider: "p", model: "m" },
+      },
+    }));
+    foldEvent(view, ev("turn/end", 12, { turn: 1, reason: { kind: "completed" } }));
+    const state = classifyTurnState(view, 9);
+    expect(state.kind).toBe("ready");
+    if (state.kind === "ready") {
+      expect(extractLastAssistantText(state.view, 9)).toBe("简单输出即可。成功。");
+    }
   });
 });

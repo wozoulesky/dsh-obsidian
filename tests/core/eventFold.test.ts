@@ -65,6 +65,39 @@ describe("foldEvent", () => {
     }
   });
 
+  it("assistant/message 只有 reasoning 块时（推理模型答案写在 thinking 里）提升为可见文本", () => {
+    const view = createSessionView("s1");
+    foldEvent(view, ev("assistant/message", 1, {
+      turn: 1,
+      step: 1,
+      message: { id: "am1", role: "assistant", content: [{ type: "reasoning", text: "简单输出即可。测试成功。" }], source: { kind: "model", provider: "p", model: "m" } },
+    }));
+    expect(view.nodes[0]).toMatchObject({ kind: "assistant", text: "简单输出即可。测试成功。" });
+  });
+
+  it("流式仅 reasoning 播放在 turn/end 兜底提升为文本", () => {
+    const view = createSessionView("s1");
+    foldEvent(view, ev("turn/start", 1, { turn: 1 }));
+    foldEvent(view, ev("assistant/chunk", 2, { turn: 1, step: 1, chunk: { type: "reasoning-delta", index: 0, text: "答案在这里" } }));
+    foldEvent(view, ev("turn/end", 3, { turn: 1, reason: { kind: "completed" } }));
+    expect(view.nodes[0]).toMatchObject({ kind: "assistant", text: "答案在这里", streaming: false });
+  });
+
+  it("含工具调用时不提升 thinking（等真正的正文）", () => {
+    const view = createSessionView("s1");
+    foldEvent(view, ev("assistant/message", 1, {
+      turn: 1,
+      step: 1,
+      message: {
+        id: "am1",
+        role: "assistant",
+        content: [{ type: "reasoning", text: "想拿工具" }, { type: "tool-call", id: "c1", name: "read", arguments: "{}" }],
+        source: { kind: "model", provider: "p", model: "m" },
+      },
+    }));
+    expect(view.nodes[0]).toMatchObject({ kind: "assistant", text: "", reasoning: "想拿工具" });
+  });
+
   it("command/run 与 command/done 生成命令卡片", () => {
     const view = createSessionView("s1");
     foldEvent(view, ev("command/run", 1, { commandId: "cmd1", name: "plan", args: undefined, source: { kind: "user" } }));

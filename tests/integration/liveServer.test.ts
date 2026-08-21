@@ -16,6 +16,11 @@ const BASE = process.env.DSH_URL ?? "http://127.0.0.1:3080";
 let alive = false;
 let client: DshClient;
 
+/** 服务不可达时跳过本用例（TestContext.skip 在部分 vitest 版本类型缺失，做一次窄化）。 */
+function skipIfDead(ctx: TestContext): void {
+  if (!alive) (ctx as unknown as { skip(reason?: string): void }).skip("本地 DSH 服务不可达");
+}
+
 beforeAll(async () => {
   try {
     const text = await postJson(
@@ -33,7 +38,7 @@ beforeAll(async () => {
 
 describe("live DSH server", () => {
   it("session.list 返回可用的会话数组（信封/结果形状契约）", async (ctx: TestContext) => {
-    if (!alive) ctx.skip("本地 DSH 服务不可达");
+    skipIfDead(ctx);
     const res = await client.list();
     expect(res.ok).toBe(true);
     if (!res.ok) return;
@@ -44,7 +49,7 @@ describe("live DSH server", () => {
   });
 
   it("session.history 对首个会话可用（含 projections 容错）", async (ctx: TestContext) => {
-    if (!alive) ctx.skip("本地 DSH 服务不可达");
+    skipIfDead(ctx);
     const list = await client.list();
     if (!list.ok || list.value.items.length === 0) return;
     const sid = list.value.items[0].sessionId;
@@ -56,7 +61,7 @@ describe("live DSH server", () => {
   });
 
   it("events.mux WebSocket 完成握手并收到至少一帧", async (ctx: TestContext) => {
-    if (!alive) ctx.skip("本地 DSH 服务不可达");
+    skipIfDead(ctx);
     const frames: { rpcId: string; frame: MuxFrame }[] = [];
     const states: string[] = [];
     const sink: MuxSink = {
@@ -75,7 +80,7 @@ describe("live DSH server", () => {
   });
 
   it("SessionManager.openSession 用真实历史播种视图（折叠真实事件形状）", async (ctx: TestContext) => {
-    if (!alive) ctx.skip("本地 DSH 服务不可达");
+    skipIfDead(ctx);
     const store = new SessionStore();
     const manager = new SessionManager({
       client: new DshClient({ baseUrl: BASE, timeoutMs: 15000 }),

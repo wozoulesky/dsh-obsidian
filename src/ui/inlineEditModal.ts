@@ -49,6 +49,12 @@ export class InlineEditModal extends Modal {
       const result = await this.runtime.inlineEdit.edit(selection, path, this.instruction || "优化这段文本");
       notice.hide();
       if (this.closed) return; // 用户已关闭弹窗：丢弃结果
+      if (result.trim() === selection.trim()) {
+        // 模型未做实质修改（如指令是询问式），给出明确反馈而非空 diff
+        new Notice("DSH 返回的内容与原文一致，未发生修改");
+        this.close();
+        return;
+      }
       if (selection.length > LARGE_DIFF_CHARS || result.length > LARGE_DIFF_CHARS) {
         // 超大内容跳过词级 diff（O(n·m) 内存），直接确认替换
         new ConfirmReplaceModal(this.app, () => this.apply(selection, result)).open();
