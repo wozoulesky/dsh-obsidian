@@ -30,6 +30,11 @@ export function truncate(text: string, max: number): string {
   return text.slice(0, max) + "…";
 }
 
+/** 替换文本中所有出现的标记（String.replace 遇字符串模式只替换首次，同一路径提及多次必须全量替换）。 */
+function replaceAll(text: string, search: string, replacement: string): string {
+  return text.split(search).join(replacement);
+}
+
 /** 把 @file:路径 / @folder:路径 标记替换为内容引用（长内容截断；缺失给出说明）。 */
 export async function resolveMentions(
   text: string,
@@ -42,8 +47,8 @@ export async function resolveMentions(
     const replacement = source === null
       ? `（找不到 ${path}，请检查路径）`
       : `${source.kind === "file" ? "文件" : "目录"} ${path}：\n> ${truncate(source.text, maxChars).replace(/\n/g, "\n> ")}`;
-    out = out.replace(`@file:${path}`, replacement);
-    out = out.replace(`@folder:${path}`, replacement);
+    out = replaceAll(out, `@file:${path}`, replacement);
+    out = replaceAll(out, `@folder:${path}`, replacement);
   }
   return out;
 }

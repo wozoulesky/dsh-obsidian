@@ -22,8 +22,11 @@ export class SessionManager {
 
   private isVaultBound(s: SessionSummary): boolean {
     if (!s.cwd) return false;
-    const norm = (p: string) => p.replace(/[\\/]+$/, "").toLowerCase();
-    return norm(s.cwd ?? "") === norm(this.deps.vaultPath) || norm(s.cwd ?? "").startsWith(norm(this.deps.vaultPath) + "\\");
+    // 统一成 "/" 归一：Windows 用 "\\"，macOS/Linux 用 "/"，不能硬编码一种分隔符
+    const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+    const cwd = norm(s.cwd);
+    const vault = norm(this.deps.vaultPath);
+    return cwd === vault || cwd.startsWith(vault + "/");
   }
 
   private displayTitle(s: SessionSummary): string {

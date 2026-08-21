@@ -35,6 +35,13 @@ describe("resolveMentions", () => {
     expect(out).toBe("整理 目录 notes：\n> a.md\n> b/");
   });
 
+  it("同一路径提及多次时全部替换（String.replace 字符串模式只替换首处的回归）", async () => {
+    const read = async (path: string) => ({ kind: "file" as const, text: "AAAA" });
+    const out = await resolveMentions("对比 @file:a.md 与 @file:a.md", read, 100);
+    expect(out.match(/文件 a\.md：/g)).toHaveLength(2);
+    expect(out).not.toContain("@file:");
+  });
+
   it("collectMentionPaths 同时捕获 file 与 folder 标记", () => {
     expect(collectMentionPaths("@file:a.md @folder:notes")).toEqual(["a.md", "notes"]);
   });

@@ -8,6 +8,7 @@ const LARGE_DIFF_CHARS = 10000;
 export class InlineEditModal extends Modal {
   private instruction = "";
   private running = false;
+  private closed = false;
 
   constructor(
     app: App,
@@ -33,6 +34,10 @@ export class InlineEditModal extends Modal {
     );
   }
 
+  onClose(): void {
+    this.closed = true; // 用户中途关闭（Esc/点击外部）：完成后不再弹后续窗口
+  }
+
   private async run(button: { setDisabled(disabled: boolean): unknown }): Promise<void> {
     if (this.running) return;
     this.running = true;
@@ -43,6 +48,7 @@ export class InlineEditModal extends Modal {
     try {
       const result = await this.runtime.inlineEdit.edit(selection, path, this.instruction || "优化这段文本");
       notice.hide();
+      if (this.closed) return; // 用户已关闭弹窗：丢弃结果
       if (selection.length > LARGE_DIFF_CHARS || result.length > LARGE_DIFF_CHARS) {
         // 超大内容跳过词级 diff（O(n·m) 内存），直接确认替换
         new ConfirmReplaceModal(this.app, () => this.apply(selection, result)).open();
@@ -52,7 +58,9 @@ export class InlineEditModal extends Modal {
       this.close();
     } catch (err) {
       notice.hide();
-      new Notice(`内联编辑失败：${err instanceof Error ? err.message : String(err)}`);
+      if (!this.closed) {
+        new Notice(`内联编辑失败：${err instanceof Error ? err.message : String(err)}`);
+      }
       this.close();
     }
   }

@@ -54,13 +54,15 @@ export interface SessionView {
   lastSeq: number;
   /** 已折叠事件的最小 seq（-1 表示尚无事件）；翻页边界以此为准，避免与历史页重叠。 */
   firstSeq: number;
+  /** 最近一次 turn/start 的 seq（-1 表示尚未开始过回合）；内联编辑按它判定"本轮回合"。 */
+  lastTurnStartSeq: number;
   /** 最近一次 turn/end 的 seq（-1 表示尚未结束过回合）。 */
   lastTurnEndSeq: number;
   running: boolean;
 }
 
 export function createSessionView(sessionId: string): SessionView {
-  return { sessionId, nodes: [], title: null, plan: { active: false, pending: false }, queueItems: [], lastSeq: -1, firstSeq: -1, lastTurnEndSeq: -1, running: false };
+  return { sessionId, nodes: [], title: null, plan: { active: false, pending: false }, queueItems: [], lastSeq: -1, firstSeq: -1, lastTurnStartSeq: -1, lastTurnEndSeq: -1, running: false };
 }
 
 /** 从内容块提取可见文本（text 块以空行连接）。 */
@@ -122,6 +124,7 @@ export function foldEvent(view: SessionView, event: SessionEvent): void {
 
   switch (event.type) {
     case "turn/start":
+      view.lastTurnStartSeq = event.seq;
       view.running = true;
       break;
     case "turn/end": {
@@ -143,7 +146,8 @@ export function foldEvent(view: SessionView, event: SessionEvent): void {
       break;
     }
     case "assistant/chunk": {
-      const node = lastAssistant(view)?.streaming ? lastAssistant(view) : undefined;
+      const existing = lastAssistant(view);
+      const node = existing?.streaming ? existing : undefined;
       const target: AssistantNode = node ?? {
         kind: "assistant",
         id: `a-${event.seq}`,

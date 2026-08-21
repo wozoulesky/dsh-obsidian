@@ -54,8 +54,16 @@ export class MuxStream {
 
   private connect(): void {
     this.emitState("reconnecting");
-    const url = this.baseUrl.replace(/\/+$/, "").replace(/^http/, "ws") + "/api/events.mux";
-    const socket = new WebSocket(url, { handshakeTimeout: 5000 });
+    let socket: WebSocket;
+    try {
+      const url = this.baseUrl.replace(/\/+$/, "").replace(/^http/, "ws") + "/api/events.mux";
+      socket = new WebSocket(url, { handshakeTimeout: 5000 });
+    } catch (err) {
+      // 配置非法 URL 时 ws 构造器同步抛错；若不兜底，重连循环会永久停摆（状态栏停在「重连中」）。
+      console.error("[dsh-bridge] WebSocket 构造失败（检查 DSH 地址设置）:", err);
+      this.scheduleReconnect();
+      return;
+    }
     this.socket = socket;
     socket.on("open", () => {
       this.attempt = 0;

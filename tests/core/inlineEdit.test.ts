@@ -50,19 +50,43 @@ describe("classifyTurnState", () => {
     expect(classifyTurnState(view, 0).kind).toBe("pending");
   });
 
+  it("本回合（turn/start 在 sinceSeq 之后）未开始前恒为 pending，旧回合收尾不算结果", () => {
+    // 上次内联编辑超时但服务端回合仍在跑：sinceSeq 后到达的旧回合节点（seq > sinceSeq）
+    // 绝不能判 ready/error——本回合的 turn/start 还没出现。
+    const view = createSessionView("s");
+    view.lastSeq = 6;
+    view.lastTurnStartSeq = 2; // 旧回合的 start，早于 sinceSeq
+    view.lastTurnEndSeq = 6; // 旧回合已结束
+    view.nodes.push({ kind: "assistant", id: "a5", text: "旧结果", reasoning: "", toolCards: [], streaming: false, seq: 5 });
+    expect(classifyTurnState(view, 2).kind).toBe("pending");
+  });
+
   it("本轮错误节点立即判 error，不回落旧文本", () => {
     const view = createSessionView("s");
     view.nodes.push({ kind: "assistant", id: "a0", text: "旧结果", reasoning: "", toolCards: [], streaming: false, seq: 1 });
     view.lastSeq = 3;
+    view.lastTurnStartSeq = 2; // 本回合已开始
     view.nodes.push({ kind: "error", id: "e2", text: "回合错误：模型挂了", seq: 3 });
-    const state = classifyTurnState(view, 2);
+    const state = classifyTurnState(view, 1);
     expect(state.kind).toBe("error");
+  });
+
+  it("轮内旧回合残留（seq > sinceSeq 但早于本轮 turn/start）不参与判定", () => {
+    const view = createSessionView("s");
+    view.lastSeq = 8;
+    view.lastTurnStartSeq = 5;
+    view.lastTurnEndSeq = 6;
+    // 旧回合残留：seq 3 > sinceSeq 2，但早于本回合 start（5）
+    view.nodes.push({ kind: "assistant", id: "a3", text: "旧回合残留", reasoning: "", toolCards: [], streaming: false, seq: 3 });
+    // 本回合结束但无文本 → error（而不是拿旧残留判 ready）
+    expect(classifyTurnState(view, 2).kind).toBe("error");
   });
 
   it("本轮已终结 assistant 判 ready，旧 assistant 不算", () => {
     const view = createSessionView("s");
     view.nodes.push({ kind: "assistant", id: "a0", text: "旧结果", reasoning: "", toolCards: [], streaming: false, seq: 1 });
     view.lastSeq = 4;
+    view.lastTurnStartSeq = 3;
     view.nodes.push({ kind: "assistant", id: "a2", text: "新结果", reasoning: "", toolCards: [], streaming: false, seq: 4 });
     expect(classifyTurnState(view, 2).kind).toBe("ready");
     // 旧节点不越过 sinceSeq：无新 assistant 时回落 pending 而非旧文本
@@ -78,6 +102,7 @@ describe("classifyTurnState", () => {
   it("本轮回合已结束但无文本时立即判 error", () => {
     const view = createSessionView("s");
     view.lastSeq = 5;
+    view.lastTurnStartSeq = 4; // 本回合已开始
     view.lastTurnEndSeq = 5;
     const state = classifyTurnState(view, 0);
     expect(state.kind).toBe("error");

@@ -128,6 +128,7 @@ export class SessionStore {
       rebuilt.nodes = [...rebuilt.nodes, ...current.nodes];
       if (current.lastSeq > rebuilt.lastSeq) rebuilt.lastSeq = current.lastSeq;
       if (current.running) rebuilt.running = true;
+      if (current.lastTurnStartSeq > rebuilt.lastTurnStartSeq) rebuilt.lastTurnStartSeq = current.lastTurnStartSeq;
       if (current.lastTurnEndSeq > rebuilt.lastTurnEndSeq) rebuilt.lastTurnEndSeq = current.lastTurnEndSeq;
       rebuilt.title = current.title ?? rebuilt.title;
       rebuilt.plan = current.plan.active || current.plan.pending ? current.plan : rebuilt.plan;

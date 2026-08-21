@@ -104,17 +104,23 @@ export class DshChatView extends ItemView {
       new Notice("请先创建会话");
       return;
     }
-    try {
-      const resolved = await resolveMentions(text, (path) => this.readVaultFile(path), this.runtime.settings.values.mentionMaxChars);
-      const res = await this.runtime.manager.prompt(sessionId, resolved, "queue");
-      if (!res.ok) new Notice(`发送失败：${res.error.message}`);
-    } catch (err) {
-      new Notice(`发送失败：${err instanceof Error ? err.message : String(err)}`);
+    const clearPendingPlan = (): void => {
       const view = this.view;
       if (view && view.plan.pending) {
         view.plan.pending = false;
         this.renderNow();
       }
+    };
+    try {
+      const resolved = await resolveMentions(text, (path) => this.readVaultFile(path), this.runtime.settings.values.mentionMaxChars);
+      const res = await this.runtime.manager.prompt(sessionId, resolved, "queue");
+      if (!res.ok) {
+        new Notice(`发送失败：${res.error.message}`);
+        clearPendingPlan(); // 服务端拒绝时本地 pending 标记要回滚，否则「计划模式切换中…」永久卡住
+      }
+    } catch (err) {
+      new Notice(`发送失败：${err instanceof Error ? err.message : String(err)}`);
+      clearPendingPlan();
     }
   }
 

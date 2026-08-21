@@ -79,6 +79,17 @@ describe("MuxStream", () => {
     expect(connections.length).toBe(countAfterStop);
   });
 
+  it("非法 URL 同步抛错不会杀死重连循环（修复：ws 构造失败也要走退避）", async () => {
+    const { sink, states } = makeSink();
+    const stream = new MuxStream("not a url", sink, { backoffBaseMs: 20 });
+    // 旧实现此处同步抛错直接炸掉 onload/重连循环；新实现转为退避重试
+    expect(() => stream.start()).not.toThrow();
+    await new Promise((r) => setTimeout(r, 100));
+    expect(states).toContain("reconnecting");
+    stream.stop();
+    await new Promise((r) => setTimeout(r, 100)); // stop 后不再有定时器触发
+  });
+
   it("backoffDelay 是指数增长并封顶的纯函数", () => {
     expect(backoffDelay(1, 100, 1000)).toBe(100);
     expect(backoffDelay(2, 100, 1000)).toBe(200);

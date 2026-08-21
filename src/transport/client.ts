@@ -1,4 +1,5 @@
 import * as http from "http";
+import * as https from "https";
 import { mintId, isServerResponse, type ClientRequest, type ClientResponse, type RpcResult, type RpcReceipt, type HistoryPayload, type HistoryResult, type PromptPayload, type PromptResult, type SessionCreatePayload, type SessionCreateResult, type SessionListResult, type CancelPayload, type CancelResult } from "./types";
 import { clearTimer, setTimer } from "../utils/timers";
 
@@ -9,54 +10,59 @@ export class TransportFailure extends Error {
   }
 }
 
-/** Node http POST，返回响应文本；非 2xx 或提前断开抛 TransportFailure；硬超时兜底。 */
+/** Node http/https POST，返回响应文本；非 2xx 或提前断开抛 TransportFailure；硬超时兜底。 */
 export function postJson(url: string, body: string, timeoutMs: number): Promise<string> {
   return new Promise<string>((resolve, reject) => {
-    const u = new URL(url);
     let settled = false;
+    let deadline: ReturnType<typeof setTimeout> | null = null;
     const fail = (err: TransportFailure) => {
       if (settled) return;
       settled = true;
+      if (deadline) clearTimer(deadline); // 任何失败路径都要清掉硬超时定时器，避免泄漏
       reject(err);
     };
-    const deadline = setTimer(() => fail(new TransportFailure(`timeout after ${timeoutMs}ms`)), timeoutMs);
-    const req = http.request(
-      {
-        hostname: u.hostname,
-        port: u.port ? Number(u.port) : 80,
-        path: u.pathname,
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "content-length": Buffer.byteLength(body),
+    try {
+      const u = new URL(url);
+      const isHttps = u.protocol === "https:";
+      deadline = setTimer(() => fail(new TransportFailure(`timeout after ${timeoutMs}ms`)), timeoutMs);
+      const req = (isHttps ? https : http).request(
+        {
+          hostname: u.hostname,
+          port: u.port ? Number(u.port) : isHttps ? 443 : 80,
+          path: u.pathname,
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "content-length": Buffer.byteLength(body),
+          },
         },
-      },
-      (res) => {
-        const chunks: Buffer[] = [];
-        res.on("data", (c: Buffer) => chunks.push(c));
-        res.on("end", () => {
-          if (settled) return;
-          settled = true;
-          clearTimer(deadline);
-          const text = Buffer.concat(chunks).toString("utf8");
-          if (res.statusCode !== undefined && res.statusCode >= 200 && res.statusCode < 300) {
-            resolve(text);
-          } else {
-            reject(new TransportFailure(`HTTP ${String(res.statusCode)} for ${url}`));
-          }
-        });
-        res.on("aborted", () => fail(new TransportFailure(`connection aborted for ${url}`)));
-        res.on("close", () => fail(new TransportFailure(`connection closed prematurely for ${url}`)));
-        res.on("error", (err) => fail(new TransportFailure(err.message, err)));
-      }
-    );
-    req.setTimeout(timeoutMs, () => req.destroy(new TransportFailure(`timeout after ${timeoutMs}ms`)));
-    req.on("error", (err) => {
-      clearTimer(deadline);
-      fail(new TransportFailure(err.message, err));
-    });
-    req.write(body);
-    req.end();
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on("data", (c: Buffer) => chunks.push(c));
+          res.on("end", () => {
+            if (settled) return;
+            settled = true;
+            if (deadline) clearTimer(deadline);
+            const text = Buffer.concat(chunks).toString("utf8");
+            if (res.statusCode !== undefined && res.statusCode >= 200 && res.statusCode < 300) {
+              resolve(text);
+            } else {
+              reject(new TransportFailure(`HTTP ${String(res.statusCode)} for ${url}`));
+            }
+          });
+          res.on("aborted", () => fail(new TransportFailure(`connection aborted for ${url}`)));
+          res.on("close", () => fail(new TransportFailure(`connection closed prematurely for ${url}`)));
+          res.on("error", (err) => fail(new TransportFailure(err.message, err)));
+        }
+      );
+      req.setTimeout(timeoutMs, () => req.destroy(new TransportFailure(`timeout after ${timeoutMs}ms`)));
+      req.on("error", (err) => fail(new TransportFailure(err.message, err)));
+      req.write(body);
+      req.end();
+    } catch (err) {
+      // new URL / http.request 对非法地址会同步抛错：转成 TransportFailure 而不是让调用方裸抛
+      fail(new TransportFailure(err instanceof Error ? err.message : String(err), err));
+    }
   });
 }
 
@@ -92,7 +98,15 @@ export class DshClient {
         error: { code: "internal", message: `rpcId 不匹配：发送 ${rpcId}，收到 ${full.rpcId}` },
       };
     }
-    return full.result as RpcResult<T>;
+    const result = full.result as RpcResult<T>;
+    if (result.ok === false) {
+      const err = (result as { error?: { code?: unknown; message?: unknown } }).error;
+      if (!err || typeof err.message !== "string" || typeof err.code !== "string") {
+        // 畸形错误结果（线上契约漂移）归一化，避免上层直接访问 error.message 崩溃
+        return { ok: false, error: { code: "internal", message: "DSH 返回了非法的错误结果" } };
+      }
+    }
+    return result;
   }
 
   /** 应答服务端请求（审批/提问），rpcId 必须回显请求帧的信封 rpcId。 */

@@ -77,6 +77,25 @@ describe("SessionManager", () => {
     expect(manager.sessions.map((s) => s.sessionId)).toEqual(["vault-1", "vault-2", "remote-1"]);
   });
 
+  it("vault 绑定在 unix 风格路径下也生效（不硬编码反斜杠/前缀误匹配）", async () => {
+    const fakeClient = {
+      list: async () => ({
+        ok: true as const,
+        value: {
+          items: [
+            { sessionId: "u1", updatedAt: 1, running: false, blank: false, cwd: "/home/user/vault" },
+            { sessionId: "u2", updatedAt: 2, running: false, blank: false, cwd: "/home/user/vault/notes" },
+            { sessionId: "u3", updatedAt: 3, running: false, blank: false, cwd: "/home/user/other" },
+            { sessionId: "u4", updatedAt: 4, running: false, blank: false, cwd: "/home/user/vault2" }, // 前缀相似但不是子目录
+          ],
+        },
+      }),
+    } as unknown as DshClient;
+    const manager = new SessionManager({ client: fakeClient, store: new SessionStore(), vaultPath: "/home/user/vault", settings: {} as DshSettings });
+    await manager.refresh();
+    expect(manager.sessions.map((s) => s.sessionId)).toEqual(["u2", "u1", "u4", "u3"]);
+  });
+
   it("newSession 以 vault 为 cwd 创建并返回 id", async () => {
     const { manager } = makeManager();
     const id = await manager.newSession();

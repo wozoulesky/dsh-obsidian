@@ -14,19 +14,24 @@ export type TurnState = { kind: "pending" } | { kind: "error"; message: string }
 
 /**
  * 依据 sinceSeq 判断一次内联编辑回合的状态：
- * - 出现 seq > sinceSeq 的错误节点 → error（绝不能把旧结果当成新结果）
- * - 出现 seq > sinceSeq 且已终结、有文本的 assistant 节点 → ready
+ * - 本回合（turn/start.seq > sinceSeq）尚未开始 → pending（期间到达的旧回合收尾事件
+ *   不能当作本轮结果——上次编辑超时但服务端回合仍在跑时，旧回合的流式内容会先于本回合到达）
+ * - 本回合已开始后出现 seq > turnStart 的错误节点 → error（绝不能把旧结果当成新结果）
+ * - 本回合已开始且已终结、有文本的 assistant 节点 → ready
  * - 否则 pending
  */
 export function classifyTurnState(view: SessionView | undefined, sinceSeq: number): TurnState {
-  if (!view || view.running || view.lastSeq <= sinceSeq) return { kind: "pending" };
+  if (!view || view.lastSeq <= sinceSeq) return { kind: "pending" };
+  if (view.lastTurnStartSeq <= sinceSeq) return { kind: "pending" }; // 本回合尚未开始
+  const floor = view.lastTurnStartSeq; // 只扫描本回合产生的新节点（旧回合残留 seq 可能 > sinceSeq）
+  if (view.running) return { kind: "pending" };
   for (let i = view.nodes.length - 1; i >= 0; i--) {
     const n = view.nodes[i];
-    if (n.seq <= sinceSeq) break; // 只检查本轮产生的新节点
+    if (n.seq <= floor) break;
     if (n.kind === "error") return { kind: "error", message: n.text };
     if (n.kind === "assistant" && !n.streaming && n.text.length > 0) return { kind: "ready", view };
   }
-  if (view.lastTurnEndSeq > sinceSeq) {
+  if (view.lastTurnEndSeq > floor) {
     return { kind: "error", message: "回合已结束，但未产生可用的替换文本" };
   }
   return { kind: "pending" };
