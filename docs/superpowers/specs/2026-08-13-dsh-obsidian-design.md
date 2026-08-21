@@ -164,3 +164,15 @@ src/
 
 - Claudian 仓库与 README：https://github.com/YishenTu/claudian
 - DSH 包源码（本地 npm 缓存 checkout）：`@deepseek-ai/dsh` 0.1.0-rc.6，关键包 `dsh-client-connection`、`dsh-api-gateway`、`dsh-host-apiproxy`、`dsh-api-remotes`、`dsh-session`、`dsh-plan-mode`、`dsh-commands`
+
+## 9. 2026-08-22 修订与实测偏差（v0.1.2）
+
+本节记录 v0.1.2 阶段对既有设计的修正，实施以本节为准：
+
+- **视图方法命名**：会话打开方法不叫 `open`（与 Obsidian 视图生命周期 `view.open(state)` 撞名 → Issue #1），改为 `openConversation` 并加非字符串防御守卫。
+- **计划状态**：原设计"投影帧 higher-seq-wins 覆盖本地 pending"假设**不成立**——实测 rc.6 从不推送 `plan/mode` 或 plan 投影帧（`/plan` 仅产生普通 LLM 回合；session.list projections 无 plan 键）。改为**本地乐观切换**：Shift+Tab 发送成功即显示目标状态；发送失败回滚。
+- **命令通道**：原设计"内置命令服务端执行，插件只负责联想与发送"实现为文本消息（实测无专用命令 RPC：`session.command`/`session.exec` 404、prompt 内容块仅 `text | image`、web 客户端无命令通道）；服务端在 LLM 回合结束后延迟执行 `/compact` 等命令（`command/run` → `compaction/*` → `command/done`），插件面板以命令卡片展示执行结果。
+- **推理模型语义**：assistant 消息仅含 reasoning 块（无 text、无工具调用）时，把 thinking 提升为可见文本（`assistant/message` 与 `turn/end` 双兜底）——与 harness UI"think 即回复"一致。
+- **内联编辑回合判定**：新增 `lastTurnStartSeq`（turn/start 记录），仅当本回合开始后才判定 ready/error，防止超时前的旧回合收尾被误判为本轮结果。
+- **联想弹窗**：`closeSuggest` 不得清空 `suggestItems`（渲染源），列表由每次输入整体替换；`/` 命令过滤需去掉前导 `/`。
+- **发布规范**：release tag 与 manifest 版本一致（不带 `v`）；资产含 `main.js`、`manifest.json`、`styles.css`、`{id}-{version}.tgz`。
