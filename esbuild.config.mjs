@@ -6,7 +6,9 @@ const prod = process.argv[2] === "production";
 const builtins = builtinModules;
 
 const context = await esbuild.context({
-  banner: { js: `/* dsh-obsidian — built ${new Date().toISOString()} */` },
+  // 固定 banner（不内嵌时间戳）：社区审核会从源码重建并字节比对产物，时间戳会导致
+  // 每次构建字节不同 → "Build output does not match the released main.js artifact"。
+  banner: { js: "/* dsh-obsidian */" },
   entryPoints: ["src/main.ts"],
   bundle: true,
   platform: "node",
