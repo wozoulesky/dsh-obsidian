@@ -68,7 +68,7 @@ export class DshChatView extends ItemView {
     this.renderHeader();
     if (this.runtime.manager.sessions.length > 0 && !this.runtime.manager.currentId) {
       const first = this.runtime.manager.sessions[0];
-      await this.open(first.sessionId);
+      await this.openConversation(first.sessionId);
     }
   }
 
@@ -81,7 +81,14 @@ export class DshChatView extends ItemView {
     this.disposers = [];
   }
 
-  private async open(sessionId: string): Promise<void> {
+  /**
+   * 按 sessionId 打开会话。
+   * 注意：不能命名为 `open`——Obsidian 视图生命周期（恢复工作区等）会调用
+   * `view.open(state)`，若与我们的方法撞名会把视图状态对象 `{}` 当 sessionId 传给
+   * `session.history`，导致 "invalid payload for session.history"。改名并防御非字符串入参。
+   */
+  private async openConversation(sessionId: string): Promise<void> {
+    if (typeof sessionId !== "string" || sessionId.length === 0) return;
     try {
       await this.runtime.manager.openSession(sessionId);
       this.render();
@@ -148,14 +155,14 @@ export class DshChatView extends ItemView {
       if (s.sessionId === this.runtime.manager.currentId) opt.selected = true;
     }
     select.addEventListener("change", () => {
-      if (select.value) void this.open(select.value);
+      if (select.value) void this.openConversation(select.value);
     });
     const newBtn = row.createEl("button", { text: "新建" });
     newBtn.addEventListener("click", () => {
       void (async () => {
         try {
           const id = await this.runtime.manager.newSession();
-          await this.open(id);
+          await this.openConversation(id);
         } catch (err) {
           new Notice(`新建会话失败：${err instanceof Error ? err.message : String(err)}`);
         }
