@@ -17,6 +17,16 @@
 - **@提及文件**：输入 `@` 选择 vault 文件，内容注入上下文
 - **斜杠命令与计划模式**：`/plan`、`/compact`、`/feedback`、`/goal`；`Shift+Tab` 切换计划模式
 
+## 截图演示
+
+| 聊天侧边栏 | @ 提及文件选择 |
+| --- | --- |
+| ![聊天侧边栏：流式会话](https://raw.githubusercontent.com/wozoulesky/dsh-obsidian/master/docs/screenshots/01-chat-panel.png) | ![@ 提及文件选择弹层](https://raw.githubusercontent.com/wozoulesky/dsh-obsidian/master/docs/screenshots/02-mention-picker.png) |
+
+| 内联编辑 diff 预览 | 工具审批弹窗 |
+| --- | --- |
+| ![内联编辑词级 diff 预览](https://raw.githubusercontent.com/wozoulesky/dsh-obsidian/master/docs/screenshots/03-inline-edit-diff.png) | ![DSH 工具审批弹窗](https://raw.githubusercontent.com/wozoulesky/dsh-obsidian/master/docs/screenshots/04-approval.png) |
+
 ## 安装（本地）
 
 1. `npm install && npm run build`

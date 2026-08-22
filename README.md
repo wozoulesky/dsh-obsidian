@@ -17,6 +17,16 @@ Embed your locally running [DeepSeek Harness (DSH)](https://www.npmjs.com/packag
 - **@mentions** — type `@` to pick vault files (`@file:path`, content injected) or folders (`@folder:path`, directory tree injected), with truncation and missing-file notices
 - **Slash commands & plan mode** — `/plan`, `/compact`, `/feedback`, `/goal` with autocomplete; `Shift+Tab` toggles plan mode with a status banner
 
+## Screenshots
+
+| Chat sidebar | @ Mention picker |
+| --- | --- |
+| ![Chat sidebar with streamed conversation](https://raw.githubusercontent.com/wozoulesky/dsh-obsidian/master/docs/screenshots/01-chat-panel.png) | ![@ mention file picker](https://raw.githubusercontent.com/wozoulesky/dsh-obsidian/master/docs/screenshots/02-mention-picker.png) |
+
+| Inline edit diff preview | Approval popup |
+| --- | --- |
+| ![Inline edit word-level diff preview](https://raw.githubusercontent.com/wozoulesky/dsh-obsidian/master/docs/screenshots/03-inline-edit-diff.png) | ![DSH tool approval popup](https://raw.githubusercontent.com/wozoulesky/dsh-obsidian/master/docs/screenshots/04-approval.png) |
+
 ## Installation (local)
 
 1. `npm install && npm run build`
@@ -32,7 +42,7 @@ All data flows through your local DSH to its configured model providers, using t
 ```bash
 npm install
 npm run dev    # watch build
-npm test       # unit tests (74)
+npm test       # unit tests (92)
 ```
 
 ## Architecture
