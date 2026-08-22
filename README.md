@@ -48,3 +48,7 @@ npm test       # unit tests (92)
 ## Architecture
 
 Transport: unary RPC over Node `http` (`POST /api/<method>`, `/api/respond`); live events over a bundled `ws` WebSocket (`/api/events.mux` — the server rejects plain SSE with 426). A core layer folds session events into view models; a UI layer renders the sidebar and modals.
+
+## Related
+
+- [obsidian-project-management](https://github.com/wozoulesky/obsidian-project-management) — the Obsidian-based project management skill that governs this plugin's development workflow (project records live in the local Obsidian vault `E:\obsidian_warehouse`)
