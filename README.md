@@ -47,4 +47,4 @@ npm test       # unit tests (92)
 
 ## Architecture
 
-Transport: unary RPC over Node `http` (`POST /api/<method>`, `/api/respond`); live events over a bundled `ws` WebSocket (`/api/events.mux` — the server rejects plain SSE with 426). A core layer folds session events into view models; a UI layer renders the sidebar and modals. See `docs/superpowers/specs/2026-08-13-dsh-obsidian-design.md`.
+Transport: unary RPC over Node `http` (`POST /api/<method>`, `/api/respond`); live events over a bundled `ws` WebSocket (`/api/events.mux` — the server rejects plain SSE with 426). A core layer folds session events into view models; a UI layer renders the sidebar and modals.
