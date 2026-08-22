@@ -51,4 +51,4 @@ Transport: unary RPC over Node `http` (`POST /api/<method>`, `/api/respond`); li
 
 ## Related
 
-- [obsidian-project-management](https://github.com/wozoulesky/obsidian-project-management) — the Obsidian-based project management skill that governs this plugin's development workflow (project records live in the local Obsidian vault `E:\obsidian_warehouse`)
+- [obsidian-project-management](https://github.com/wozoulesky/obsidian-project-management) — the Obsidian-based project management skill that governs this plugin's development workflow (project records are tracked in a local Obsidian vault).

@@ -51,4 +51,4 @@ npm test       # 单元测试
 
 ## 关联项目
 
-- [obsidian-project-management](https://github.com/wozoulesky/obsidian-project-management)：本插件开发协作所遵循的 Obsidian 项目协作 Skill（项目记录以本机 Obsidian Vault `E:\obsidian_warehouse` 为唯一事实来源）
+- [obsidian-project-management](https://github.com/wozoulesky/obsidian-project-management)：本插件开发协作所遵循的 Obsidian 项目协作 Skill（项目记录以本机 Obsidian Vault 为唯一事实来源）
