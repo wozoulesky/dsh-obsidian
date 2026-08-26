@@ -27,7 +27,14 @@
 | --- | --- |
 | ![内联编辑词级 diff 预览](https://raw.githubusercontent.com/wozoulesky/dsh-obsidian/master/docs/screenshots/03-inline-edit-diff.png) | ![DSH 工具审批弹窗](https://raw.githubusercontent.com/wozoulesky/dsh-obsidian/master/docs/screenshots/04-approval.png) |
 
-## 安装（本地）
+## 安装（社区插件库）
+
+1. 设置 → 第三方插件 → 浏览 → 搜索 **DSH Bridge** → 安装 → 启用（仅桌面端）
+2. 确保本地 DSH 正在运行（默认 `http://127.0.0.1:3080`）
+
+偏好手动安装？从 [GitHub Release 页面](https://github.com/wozoulesky/dsh-obsidian/releases) 下载最新产物，解压到 `vault/.obsidian/plugins/dsh-bridge/`。
+
+## 安装（本地开发）
 
 1. `npm install && npm run build`
 2. 把 `main.js`、`manifest.json`、`styles.css` 复制到 `vault/.obsidian/plugins/dsh-bridge/`

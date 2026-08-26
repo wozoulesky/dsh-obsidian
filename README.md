@@ -27,7 +27,14 @@ Embed your locally running [DeepSeek Harness (DSH)](https://www.npmjs.com/packag
 | --- | --- |
 | ![Inline edit word-level diff preview](https://raw.githubusercontent.com/wozoulesky/dsh-obsidian/master/docs/screenshots/03-inline-edit-diff.png) | ![DSH tool approval popup](https://raw.githubusercontent.com/wozoulesky/dsh-obsidian/master/docs/screenshots/04-approval.png) |
 
-## Installation (local)
+## Installation (Community Plugins)
+
+1. Settings → Third-party plugins → Browse → search **DSH Bridge** → Install → Enable (desktop only)
+2. Make sure DSH is running locally (default `http://127.0.0.1:3080`)
+
+Prefer a manual install? Grab the latest artifacts from the [GitHub releases page](https://github.com/wozoulesky/dsh-obsidian/releases) and extract them into `vault/.obsidian/plugins/dsh-bridge/`.
+
+## Installation (local / dev)
 
 1. `npm install && npm run build`
 2. Copy `main.js`, `manifest.json`, and `styles.css` into `vault/.obsidian/plugins/dsh-bridge/`
