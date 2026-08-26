@@ -1,5 +1,6 @@
+import { readFileSync } from "fs";
 import { describe, expect, it } from "vitest";
-import { I18n, loadI18n } from "../src/i18n";
+import { DEFAULT_STRINGS, I18n, loadI18n } from "../src/i18n";
 
 describe("I18n.t", () => {
   it("返回默认中文文案", () => {
@@ -47,5 +48,12 @@ describe("loadI18n", () => {
   it("非对象 JSON 时回落默认", async () => {
     const i18n = await loadI18n("dir", async () => "[]");
     expect(i18n.t("chat.older")).toBe("加载更早");
+  });
+});
+
+describe("i18n.template.json", () => {
+  it("模板键与 DEFAULT_STRINGS 完全一致，避免文档与实现漂移", () => {
+    const template = JSON.parse(readFileSync("i18n.template.json", "utf8"));
+    expect(Object.keys(template).sort()).toEqual(Object.keys(DEFAULT_STRINGS).sort());
   });
 });
