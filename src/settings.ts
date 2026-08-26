@@ -10,7 +10,8 @@ export const DEFAULT_SETTINGS: DshPluginSettings = {
   dshUrl: "http://127.0.0.1:3080",
   mentionMaxChars: 8000,
   inlineEditTimeoutSec: 180,
-  historyPageSize: 50,
+  // 20 条消息/页：超长会话播种与「加载更早」的 Markdown 渲染量更轻（50 条大消息一次性渲染可能导致渲染进程卡死白屏，观察中）
+  historyPageSize: 20,
   inlineEditSessionId: "",
 };
 

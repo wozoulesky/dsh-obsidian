@@ -1,6 +1,6 @@
 import { App, ItemView, MarkdownRenderer, Modal, Notice, Setting, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { DshInputBox } from "./inputBox";
-import { resolveMentions, truncate } from "./prompts";
+import { resolveMentions, truncate, isClearCommand } from "./prompts";
 import { nodeCacheKey, nodeSignature } from "./chatNode";
 import type { I18n } from "../i18n";
 import { clearTimer, setTimer } from "../utils/timers";
@@ -144,6 +144,11 @@ export class DshChatView extends ItemView {
   }
 
   private async send(text: string): Promise<boolean> {
+    // /clear：前端命令，不发给服务端（Claude Code 风格：建立干净会话，历史保留在 DSH 会话列表）
+    if (isClearCommand(text)) {
+      await this.handleClear();
+      return true;
+    }
     const sessionId = this.runtime.manager.currentId;
     if (!sessionId) {
       new Notice(this.runtime.i18n.t("chat.pleaseCreateSession"));
@@ -169,6 +174,19 @@ export class DshChatView extends ItemView {
       new Notice(this.runtime.i18n.t("chat.sendFailed", { message: err instanceof Error ? err.message : String(err) }));
       clearPendingPlan();
       return false;
+    }
+  }
+
+  /** /clear：建立全新会话（顶替当前会话，上下文清空，历史保留在 DSH 会话列表），并重置内联编辑专用会话。 */
+  private async handleClear(): Promise<void> {
+    try {
+      const id = await this.runtime.manager.newSession();
+      this.runtime.settings.values.inlineEditSessionId = "";
+      await this.runtime.settings.save().catch(() => undefined);
+      await this.openConversation(id);
+      new Notice(this.runtime.i18n.t("chat.clearDone"));
+    } catch (err) {
+      new Notice(this.runtime.i18n.t("chat.clearFailed", { message: err instanceof Error ? err.message : String(err) }));
     }
   }
 

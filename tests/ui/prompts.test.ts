@@ -1,10 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { BUILTIN_COMMANDS, collectMentionPaths, filterBuiltinCommands, matchSuggestToken, resolveMentions, truncate } from "../../src/ui/prompts";
+import { BUILTIN_COMMANDS, collectMentionPaths, filterBuiltinCommands, isClearCommand, matchSuggestToken, resolveMentions, truncate } from "../../src/ui/prompts";
 
 describe("BUILTIN_COMMANDS", () => {
   it("包含 /plan 且所有命令以 / 开头", () => {
     expect(BUILTIN_COMMANDS.some((c) => c.name === "/plan")).toBe(true);
     for (const c of BUILTIN_COMMANDS) expect(c.name.startsWith("/")).toBe(true);
+  });
+
+  it("包含前端命令 /clear（本地拦截，不发给服务端）", () => {
+    expect(BUILTIN_COMMANDS.some((c) => c.name === "/clear")).toBe(true);
+  });
+});
+
+describe("isClearCommand", () => {
+  it("精确匹配 /clear（忽略首尾空白）", () => {
+    expect(isClearCommand("/clear")).toBe(true);
+    expect(isClearCommand("  /clear  ")).toBe(true);
+  });
+
+  it("带参数/其他文本不拦截（/clear foo 仍按普通消息发给 DSH）", () => {
+    expect(isClearCommand("/clear foo")).toBe(false);
+    expect(isClearCommand("/compact")).toBe(false);
+    expect(isClearCommand("normal message")).toBe(false);
   });
 });
 

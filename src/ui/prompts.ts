@@ -2,13 +2,19 @@ export interface BuiltinCommand {
   name: string;
 }
 
-/** v1 内置命令清单（与 DSH 内置命令对齐；服务端执行，插件只负责联想与发送）。 */
+/** 内置命令清单：/plan /compact /feedback /goal 由服务端执行（插件只负责联想与发送）；/clear 为前端命令（本地清空会话）。 */
 export const BUILTIN_COMMANDS: BuiltinCommand[] = [
+  { name: "/clear" },
   { name: "/plan" },
   { name: "/compact" },
   { name: "/feedback" },
   { name: "/goal" },
 ];
+
+/** /clear 精确匹配（前端拦截，不发给服务端）。 */
+export function isClearCommand(text: string): boolean {
+  return text.trim() === "/clear";
+}
 
 const MENTION_RE = /@(?:file|folder):([^\s@]+)/g;
 

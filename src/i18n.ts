@@ -33,6 +33,8 @@ export const DEFAULT_STRINGS: Record<string, string> = {
   "chat.noSession": "尚无会话，点击「新建」开始。",
   "chat.sessionFallback": "会话 {id}",
   "chat.running": "⏳ DSH 正在工作…",
+  "chat.clearDone": "已清空当前会话：新建了干净会话（历史保留在 DSH 会话列表），内联编辑专用会话也已重置",
+  "chat.clearFailed": "清空会话失败：{message}",
   "chat.noText": "（无文本）",
   "chat.turnError": "回合错误：{message}",
   "chat.commandLine": "{status} 命令 {name}",
@@ -101,6 +103,7 @@ export const DEFAULT_STRINGS: Record<string, string> = {
   "settings.exportI18nFailed": "导出失败：{message}",
 
   // 内置命令联想
+  "command.clear.desc": "清空当前会话并新建干净会话（/clear）",
   "command.plan.desc": "进入计划模式（/plan off 退出）",
   "command.compact.desc": "压缩会话历史",
   "command.feedback.desc": "给最近的回复打分反馈",
