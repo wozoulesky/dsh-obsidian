@@ -306,24 +306,28 @@ export class DshChatView extends ItemView {
   /** 构建单条消息 DOM；与缓存解耦，返回元素供 renderNow 复用或重建。 */
   private buildNodeEl(node: ViewNode): HTMLElement {
     if (node.kind === "user") {
-      const el = createDiv({ cls: node.sourceKind === "user" ? "dsh-msg-user" : "dsh-msg-context" });
+      const el = document.createElement("div");
+      el.className = node.sourceKind === "user" ? "dsh-msg-user" : "dsh-msg-context";
       el.setText(node.text);
       return el;
     }
     if (node.kind === "error") {
-      const el = createDiv({ cls: "dsh-msg-context" });
+      const el = document.createElement("div");
+      el.className = "dsh-msg-context";
       el.setText(this.runtime.i18n.t("chat.turnError", { message: node.text }));
       return el;
     }
     if (node.kind === "command") {
-      const el = createDiv({ cls: "dsh-msg-command" });
+      const el = document.createElement("div");
+      el.className = "dsh-msg-command";
       const statusText = node.status === "running" ? "⏳" : node.status === "success" ? "✓" : "✗";
       el.setText(node.text
         ? this.runtime.i18n.t("chat.commandLineWithText", { status: statusText, name: node.name, text: node.text })
         : this.runtime.i18n.t("chat.commandLine", { status: statusText, name: node.name }));
       return el;
     }
-    const wrap = createDiv({ cls: "dsh-msg-assistant" });
+    const wrap = document.createElement("div");
+    wrap.className = "dsh-msg-assistant";
     const body = wrap.createDiv();
     const text = node.text.length > 0 ? node.text : (node.streaming ? "…" : this.runtime.i18n.t("chat.noText"));
     void MarkdownRenderer.render(this.app, text, body, "", this);
