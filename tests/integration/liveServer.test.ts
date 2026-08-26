@@ -87,6 +87,7 @@ describe("live DSH server", () => {
       store,
       vaultPath: process.cwd(),
       settings: { values: { historyPageSize: 50 } } as unknown as DshSettings,
+      t: (key) => key,
     });
     await manager.refresh();
     expect(manager.sessions.length).toBeGreaterThan(0);

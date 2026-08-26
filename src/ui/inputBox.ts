@@ -19,7 +19,7 @@ export class DshInputBox {
     private onPlanToggle: (active: boolean) => void
   ) {
     this.wrap = container.createDiv({ cls: "dsh-input-wrap" });
-    this.textarea = this.wrap.createEl("textarea", { cls: "dsh-input", attr: { placeholder: "给 DSH 发任务…（/ 命令，@ 提及文件，Shift+Tab 计划模式）" } });
+    this.textarea = this.wrap.createEl("textarea", { cls: "dsh-input", attr: { placeholder: this.runtime.i18n.t("input.placeholder") } });
     this.textarea.addEventListener("keydown", (e) => {
       void this.onKeydown(e);
     });
@@ -97,7 +97,7 @@ export class DshInputBox {
       return;
     }
     const items = token.kind === "slash"
-      ? filterBuiltinCommands(token.query).map((c) => `${c.name} — ${c.description}`)
+      ? filterBuiltinCommands(token.query).map((c) => `${c.name} — ${this.runtime.i18n.t(`command.${c.name.slice(1)}.desc`)}`)
       : this.mentionCandidates(token.query).slice(0, 20);
     if (items.length === 0) {
       this.closeSuggest();

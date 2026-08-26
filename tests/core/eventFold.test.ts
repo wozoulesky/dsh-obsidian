@@ -126,7 +126,7 @@ describe("foldEvent", () => {
     const view = createSessionView("s1");
     foldEvent(view, ev("turn/start", 1, { turn: 1 }));
     foldEvent(view, ev("turn/end", 2, { turn: 1, reason: { kind: "error", error: { message: "模型挂了", code: "E1" } } }));
-    expect(view.nodes.at(-1)).toMatchObject({ kind: "error", text: "回合错误：模型挂了" });
+    expect(view.nodes.at(-1)).toMatchObject({ kind: "error", text: "模型挂了" });
   });
 
   it("同一回合多步骤生成多个 assistant 节点", () => {

@@ -1,6 +1,8 @@
 import { App, ItemView, MarkdownRenderer, Modal, Notice, Setting, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { DshInputBox } from "./inputBox";
 import { resolveMentions, truncate } from "./prompts";
+import { nodeCacheKey, nodeSignature } from "./chatNode";
+import type { I18n } from "../i18n";
 import { clearTimer, setTimer } from "../utils/timers";
 import type { DshRuntime } from "../main";
 import type { SessionView, ViewNode } from "../core/eventFold";
@@ -20,6 +22,13 @@ export class DshChatView extends ItemView {
   private approvalModalOpen = false;
   private questionModalOpen = false;
   private disposers: (() => void)[] = [];
+  /** 消息节点 DOM 缓存：key=`${sessionId}:${node.id}`，避免流式时全量重建/重渲染 Markdown。 */
+  private nodeCache = new Map<string, { el: HTMLElement; sig: string }>();
+  private cachedSessionId: string | null = null;
+  private olderBtn!: HTMLElement;
+  private nodesEl!: HTMLElement;
+  private runningEl!: HTMLElement;
+  private emptyEl!: HTMLElement;
 
   constructor(leaf: WorkspaceLeaf, private runtime: DshRuntime) {
     super(leaf);
@@ -50,6 +59,22 @@ export class DshChatView extends ItemView {
     this.renderHeader();
     this.planEl = contentEl.createDiv();
     this.msgEl = contentEl.createDiv({ cls: "dsh-chat-messages" });
+    this.olderBtn = this.msgEl.createEl("button", { text: this.runtime.i18n.t("chat.older") });
+    this.olderBtn.addEventListener("click", () => {
+      void (async () => {
+        const view = this.view;
+        if (!view) return;
+        try {
+          await this.runtime.manager.loadOlder(view.sessionId);
+          this.renderNow();
+        } catch (err) {
+          new Notice(this.runtime.i18n.t("chat.loadFailed", { message: err instanceof Error ? err.message : String(err) }));
+        }
+      })();
+    });
+    this.nodesEl = this.msgEl.createDiv({ cls: "dsh-chat-nodes" });
+    this.runningEl = this.msgEl.createDiv({ cls: "dsh-chat-status", text: this.runtime.i18n.t("chat.running") });
+    this.emptyEl = this.msgEl.createDiv({ cls: "dsh-chat-status", text: this.runtime.i18n.t("chat.noSession") });
     this.input = new DshInputBox(contentEl, this.runtime, () => this.view, (text) => this.send(text), (active) => this.applyPlanToggle(active));
 
     this.disposers.push(this.runtime.store.onChange(() => this.render()));
@@ -63,7 +88,7 @@ export class DshChatView extends ItemView {
     try {
       await this.runtime.manager.refresh();
     } catch (err) {
-      new Notice(`会话列表拉取失败：${err instanceof Error ? err.message : String(err)}`);
+      new Notice(this.runtime.i18n.t("chat.listLoadFailed", { message: err instanceof Error ? err.message : String(err) }));
     }
     this.renderHeader();
     if (this.runtime.manager.sessions.length > 0 && !this.runtime.manager.currentId) {
@@ -94,7 +119,7 @@ export class DshChatView extends ItemView {
       this.render();
       this.renderHeader();
     } catch (err) {
-      new Notice(`打开会话失败：${err instanceof Error ? err.message : String(err)}`);
+      new Notice(this.runtime.i18n.t("chat.openFailed", { message: err instanceof Error ? err.message : String(err) }));
     }
   }
 
@@ -110,7 +135,7 @@ export class DshChatView extends ItemView {
   private async send(text: string): Promise<boolean> {
     const sessionId = this.runtime.manager.currentId;
     if (!sessionId) {
-      new Notice("请先创建会话");
+      new Notice(this.runtime.i18n.t("chat.pleaseCreateSession"));
       return false;
     }
     const clearPendingPlan = (): void => {
@@ -124,13 +149,13 @@ export class DshChatView extends ItemView {
       const resolved = await resolveMentions(text, (path) => this.readVaultFile(path), this.runtime.settings.values.mentionMaxChars);
       const res = await this.runtime.manager.prompt(sessionId, resolved, "queue");
       if (!res.ok) {
-        new Notice(`发送失败：${res.error.message}`);
+        new Notice(this.runtime.i18n.t("chat.sendFailed", { message: res.error.message }));
         clearPendingPlan(); // 服务端拒绝时本地 pending 标记要回滚，否则「计划模式切换中…」永久卡住
         return false;
       }
       return true;
     } catch (err) {
-      new Notice(`发送失败：${err instanceof Error ? err.message : String(err)}`);
+      new Notice(this.runtime.i18n.t("chat.sendFailed", { message: err instanceof Error ? err.message : String(err) }));
       clearPendingPlan();
       return false;
     }
@@ -167,7 +192,7 @@ export class DshChatView extends ItemView {
     this.headerEl.empty();
     const row = this.headerEl.createDiv();
     const select = row.createEl("select");
-    select.createEl("option", { text: "（无会话）", value: "" });
+    select.createEl("option", { text: this.runtime.i18n.t("chat.noSessionOption"), value: "" });
     for (const s of this.runtime.manager.sessions) {
       const opt = select.createEl("option", { text: this.runtime.manager.sessionTitle(s.sessionId) + (s.running ? " ⏳" : ""), value: s.sessionId });
       if (s.sessionId === this.runtime.manager.currentId) opt.selected = true;
@@ -175,23 +200,23 @@ export class DshChatView extends ItemView {
     select.addEventListener("change", () => {
       if (select.value) void this.openConversation(select.value);
     });
-    const newBtn = row.createEl("button", { text: "新建" });
+    const newBtn = row.createEl("button", { text: this.runtime.i18n.t("chat.new") });
     newBtn.addEventListener("click", () => {
       void (async () => {
         try {
           const id = await this.runtime.manager.newSession();
           await this.openConversation(id);
         } catch (err) {
-          new Notice(`新建会话失败：${err instanceof Error ? err.message : String(err)}`);
+          new Notice(this.runtime.i18n.t("chat.newSessionFailed", { message: err instanceof Error ? err.message : String(err) }));
         }
       })();
     });
-    const stopBtn = row.createEl("button", { text: "停止" });
+    const stopBtn = row.createEl("button", { text: this.runtime.i18n.t("chat.stop") });
     stopBtn.addEventListener("click", () => {
       void (async () => {
         if (this.runtime.manager.currentId) {
           const res = await this.runtime.manager.cancel(this.runtime.manager.currentId);
-          if (!res.ok) new Notice(`停止失败：${res.error.message}`);
+          if (!res.ok) new Notice(this.runtime.i18n.t("chat.stopFailed", { message: res.error.message }));
         }
       })();
     });
@@ -224,56 +249,92 @@ export class DshChatView extends ItemView {
     const view = this.view;
     this.planEl.empty();
     if (view) {
-      if (view.plan.pending) this.planEl.createDiv({ cls: "dsh-plan-banner", text: "计划模式切换中…" });
-      else if (view.plan.active) this.planEl.createDiv({ cls: "dsh-plan-banner", text: "计划模式已开启" });
+      if (view.plan.pending) this.planEl.createDiv({ cls: "dsh-plan-banner", text: this.runtime.i18n.t("chat.planPending") });
+      else if (view.plan.active) this.planEl.createDiv({ cls: "dsh-plan-banner", text: this.runtime.i18n.t("chat.planActive") });
     }
-    this.msgEl.empty();
+
+    const msg = this.msgEl;
+    const scrollTop = msg.scrollTop;
+    const atBottom = msg.scrollTop + msg.clientHeight >= msg.scrollHeight - 4;
+
     if (!view) {
-      this.msgEl.createDiv({ text: "尚无会话，点击「新建」开始。", cls: "dsh-chat-status" });
+      this.cachedSessionId = null;
+      this.nodeCache.clear();
+      this.nodesEl.empty();
+      this.olderBtn.style.display = "none";
+      this.runningEl.style.display = "none";
+      this.emptyEl.style.display = "";
       return;
     }
-    const olderBtn = this.msgEl.createEl("button", { text: "加载更早" });
-    olderBtn.addEventListener("click", () => {
-      void (async () => {
-        try {
-          await this.runtime.manager.loadOlder(view.sessionId);
-          this.renderNow();
-        } catch (err) {
-          new Notice(`加载失败：${err instanceof Error ? err.message : String(err)}`);
-        }
-      })();
-    });
-    for (const node of view.nodes) this.renderNode(node);
-    if (view.running) this.msgEl.createDiv({ cls: "dsh-chat-status", text: "⏳ DSH 正在工作…" });
+
+    if (this.cachedSessionId !== view.sessionId) {
+      this.cachedSessionId = view.sessionId;
+      this.nodeCache.clear();
+      this.nodesEl.empty();
+    }
+
+    this.olderBtn.style.display = "";
+    this.runningEl.style.display = view.running ? "" : "none";
+    this.emptyEl.style.display = "none";
+
+    const seen = new Set<string>();
+    for (const node of view.nodes) {
+      const key = nodeCacheKey(view.sessionId, node);
+      seen.add(key);
+      const sig = nodeSignature(node);
+      const cached = this.nodeCache.get(key);
+      if (cached && cached.sig === sig) {
+        // 复用已有 DOM：appendChild 会按当前遍历顺序移动，保证「加载更早」前插、节点顺序正确。
+        this.nodesEl.appendChild(cached.el);
+      } else {
+        const el = this.buildNodeEl(node);
+        this.nodeCache.set(key, { el, sig });
+        this.nodesEl.appendChild(el);
+      }
+    }
+    for (const [key, cached] of this.nodeCache) {
+      if (!seen.has(key)) {
+        cached.el.remove();
+        this.nodeCache.delete(key);
+      }
+    }
+
+    if (atBottom) msg.scrollTop = msg.scrollHeight;
+    else msg.scrollTop = scrollTop;
   }
 
-  private renderNode(node: ViewNode): void {
+  /** 构建单条消息 DOM；与缓存解耦，返回元素供 renderNow 复用或重建。 */
+  private buildNodeEl(node: ViewNode): HTMLElement {
     if (node.kind === "user") {
-      const el = this.msgEl.createDiv({ cls: node.sourceKind === "user" ? "dsh-msg-user" : "dsh-msg-context" });
+      const el = createDiv({ cls: node.sourceKind === "user" ? "dsh-msg-user" : "dsh-msg-context" });
       el.setText(node.text);
-      return;
+      return el;
     }
     if (node.kind === "error") {
-      const el = this.msgEl.createDiv({ cls: "dsh-msg-context" });
-      el.setText(node.text);
-      return;
+      const el = createDiv({ cls: "dsh-msg-context" });
+      el.setText(this.runtime.i18n.t("chat.turnError", { message: node.text }));
+      return el;
     }
     if (node.kind === "command") {
-      const el = this.msgEl.createDiv({ cls: "dsh-msg-command" });
+      const el = createDiv({ cls: "dsh-msg-command" });
       const statusText = node.status === "running" ? "⏳" : node.status === "success" ? "✓" : "✗";
-      el.setText(`${statusText} 命令 ${node.name}${node.text ? `：${node.text}` : ""}`);
-      return;
+      el.setText(node.text
+        ? this.runtime.i18n.t("chat.commandLineWithText", { status: statusText, name: node.name, text: node.text })
+        : this.runtime.i18n.t("chat.commandLine", { status: statusText, name: node.name }));
+      return el;
     }
-    const wrap = this.msgEl.createDiv({ cls: "dsh-msg-assistant" });
+    const wrap = createDiv({ cls: "dsh-msg-assistant" });
     const body = wrap.createDiv();
-    const text = node.text.length > 0 ? node.text : (node.streaming ? "…" : "（无文本）");
+    const text = node.text.length > 0 ? node.text : (node.streaming ? "…" : this.runtime.i18n.t("chat.noText"));
     void MarkdownRenderer.render(this.app, text, body, "", this);
     for (const card of node.toolCards) {
       const details = wrap.createEl("details", { cls: "dsh-tool-card" });
-      details.createEl("summary", { text: `🛠 ${card.name}${card.status === "running" ? "（执行中）" : card.status === "error" ? "（失败）" : ""}` });
+      const suffix = card.status === "running" ? this.runtime.i18n.t("chat.toolRunning") : card.status === "error" ? this.runtime.i18n.t("chat.toolError") : "";
+      details.createEl("summary", { text: `🛠 ${card.name}${suffix}` });
       const pre = details.createDiv({ cls: "dsh-tool-result" });
       pre.setText(truncate(card.resultText ?? card.args ?? "", 4000));
     }
+    return wrap;
   }
 
   private maybeShowNextApproval(): void {
@@ -281,12 +342,12 @@ export class DshChatView extends ItemView {
     const p = this.runtime.approvals.pendingApprovals.find((a) => a.sessionId === current) ?? this.runtime.approvals.pendingApprovals[0];
     if (p && !this.approvalModalOpen) {
       this.approvalModalOpen = true;
-      new ApprovalModal(this.app, p, this.runtime.approvals, () => (this.approvalModalOpen = false)).open();
+      new ApprovalModal(this.app, p, this.runtime.approvals, () => (this.approvalModalOpen = false), this.runtime.i18n).open();
     }
     const q = this.runtime.approvals.pendingQuestions.find((x) => x.sessionId === current) ?? this.runtime.approvals.pendingQuestions[0];
     if (q && !this.questionModalOpen) {
       this.questionModalOpen = true;
-      new QuestionModal(this.app, q, this.runtime.approvals, () => (this.questionModalOpen = false)).open();
+      new QuestionModal(this.app, q, this.runtime.approvals, () => (this.questionModalOpen = false), this.runtime.i18n).open();
     }
   }
 }
@@ -296,17 +357,18 @@ export class ApprovalModal extends Modal {
     app: App,
     private p: PendingApproval,
     private center: { decideApproval(p: PendingApproval, outcome: "allowed-once" | "rejected"): Promise<RpcReceipt> },
-    private onCloseCb: () => void
+    private onCloseCb: () => void,
+    private i18n: I18n
   ) {
     super(app);
   }
 
   onOpen(): void {
-    this.titleEl.setText(`DSH 请求执行：${this.p.toolName}`);
-    this.contentEl.createEl("p").setText(this.p.reason ?? "（未说明理由）");
+    this.titleEl.setText(this.i18n.t("approval.title", { toolName: this.p.toolName }));
+    this.contentEl.createEl("p").setText(this.p.reason ?? this.i18n.t("approval.noReason"));
     new Setting(this.contentEl)
-      .addButton((b) => b.setButtonText("拒绝").onClick(() => void this.decide("rejected")))
-      .addButton((b) => b.setButtonText("允许一次").setCta().onClick(() => void this.decide("allowed-once")));
+      .addButton((b) => b.setButtonText(this.i18n.t("approval.reject")).onClick(() => void this.decide("rejected")))
+      .addButton((b) => b.setButtonText(this.i18n.t("approval.allowOnce")).setCta().onClick(() => void this.decide("allowed-once")));
   }
 
   private async decide(outcome: "allowed-once" | "rejected"): Promise<void> {
@@ -317,13 +379,13 @@ export class ApprovalModal extends Modal {
         return;
       }
       if (receipt.accepted === false && receipt.reason === "not-pending") {
-        new Notice("该审批已在别处处理");
+        new Notice(this.i18n.t("approval.alreadyHandled"));
         this.close();
         return;
       }
-      new Notice("应答未被接受，请重试"); // bad-response：保留弹窗供重试
+      new Notice(this.i18n.t("approval.notAccepted")); // bad-response：保留弹窗供重试
     } catch (err) {
-      new Notice(`审批应答失败，请重试：${err instanceof Error ? err.message : String(err)}`);
+      new Notice(this.i18n.t("approval.failed", { message: err instanceof Error ? err.message : String(err) }));
       // 不关闭：按钮可再次点击重试
     }
   }
@@ -340,19 +402,20 @@ export class QuestionModal extends Modal {
     app: App,
     private p: PendingQuestion,
     private center: { answerQuestion(p: PendingQuestion, answers: AskUserQuestionAnswerItem[]): Promise<RpcReceipt> },
-    private onCloseCb: () => void
+    private onCloseCb: () => void,
+    private i18n: I18n
   ) {
     super(app);
   }
 
   onOpen(): void {
-    this.titleEl.setText("DSH 想问你几个问题");
+    this.titleEl.setText(this.i18n.t("question.title"));
     for (const q of this.p.questions) {
       this.contentEl.createEl("h6").setText(q.header ?? q.question);
       if (q.detail) this.contentEl.createEl("p").setText(q.detail);
       const options = q.options ?? [];
       if (options.length === 0) {
-        const input = this.contentEl.createEl("input", { attr: { type: "text", placeholder: "自由回答" } });
+        const input = this.contentEl.createEl("input", { attr: { type: "text", placeholder: this.i18n.t("question.freeAnswer") } });
         const answer: AskUserQuestionAnswerItem = { id: q.id, selected: [], custom: "" };
         this.answers.push(answer);
         input.addEventListener("input", () => {
@@ -377,7 +440,7 @@ export class QuestionModal extends Modal {
         });
       }
     }
-    new Setting(this.contentEl).addButton((b) => b.setButtonText("提交").setCta().onClick(() => void this.submit()));
+    new Setting(this.contentEl).addButton((b) => b.setButtonText(this.i18n.t("question.submit")).setCta().onClick(() => void this.submit()));
   }
 
   private async submit(): Promise<void> {
@@ -388,13 +451,13 @@ export class QuestionModal extends Modal {
         return;
       }
       if (receipt.accepted === false && receipt.reason === "not-pending") {
-        new Notice("该提问已在别处处理");
+        new Notice(this.i18n.t("question.alreadyHandled"));
         this.close();
         return;
       }
-      new Notice("应答未被接受，请重试");
+      new Notice(this.i18n.t("question.notAccepted"));
     } catch (err) {
-      new Notice(`提问应答失败，请重试：${err instanceof Error ? err.message : String(err)}`);
+      new Notice(this.i18n.t("question.failed", { message: err instanceof Error ? err.message : String(err) }));
       // 不关闭：可重试
     }
   }

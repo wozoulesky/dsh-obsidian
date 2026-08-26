@@ -9,10 +9,11 @@ export class DshSettingTab extends PluginSettingTab {
   /** Obsidian 1.13+ 声明式设置定义（可被设置搜索索引）。 */
   getSettingDefinitions(): SettingDefinitionItem[] {
     const s = this.plugin.settings;
+    const t = this.plugin.runtime.i18n.t;
     return [
       {
-        name: "DSH 地址",
-        desc: "本地 DSH 服务地址（默认 http://127.0.0.1:3080）",
+        name: t("settings.dshUrlName"),
+        desc: t("settings.dshUrlDesc"),
         control: {
           type: "text",
           key: "dshUrl",
@@ -21,24 +22,24 @@ export class DshSettingTab extends PluginSettingTab {
         },
       },
       {
-        name: "@提及文件内容上限（字符）",
-        desc: "提及文件时注入内容的最大长度，超长截断",
+        name: t("settings.mentionMaxCharsName"),
+        desc: t("settings.mentionMaxCharsDesc"),
         control: { type: "number", key: "mentionMaxChars", defaultValue: s.values.mentionMaxChars, min: 1, step: 1 },
       },
       {
-        name: "内联编辑超时（秒）",
+        name: t("settings.inlineEditTimeoutName"),
         control: { type: "number", key: "inlineEditTimeoutSec", defaultValue: s.values.inlineEditTimeoutSec, min: 1, step: 1 },
       },
       {
-        name: "历史页大小",
-        desc: "每次拉取会话历史的条数",
+        name: t("settings.historyPageSizeName"),
+        desc: t("settings.historyPageSizeDesc"),
         control: { type: "number", key: "historyPageSize", defaultValue: s.values.historyPageSize, min: 1, step: 1 },
       },
       {
-        name: "重置内联编辑专用会话",
-        desc: "下次内联编辑将创建全新会话",
+        name: t("settings.resetSessionName"),
+        desc: t("settings.resetSessionDesc"),
         action: (el) => {
-          const btn = el.createEl("button", { text: "重置" });
+          const btn = el.createEl("button", { text: t("settings.resetButton") });
           btn.addEventListener("click", () => {
             void (async () => {
               s.values.inlineEditSessionId = "";
@@ -71,16 +72,17 @@ export class DshSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     const s = this.plugin.settings;
+    const t = this.plugin.runtime.i18n.t;
 
-    new Setting(containerEl).setName("DSH 地址").setDesc("本地 DSH 服务地址（默认 http://127.0.0.1:3080）").addText((t) =>
-      t.setValue(s.values.dshUrl).onChange(async (v) => {
+    new Setting(containerEl).setName(t("settings.dshUrlName")).setDesc(t("settings.dshUrlDesc")).addText((text) =>
+      text.setValue(s.values.dshUrl).onChange(async (v) => {
         s.values.dshUrl = v.trim();
         await s.save();
       })
     );
 
-    new Setting(containerEl).setName("@提及文件内容上限（字符）").setDesc("提及文件时注入内容的最大长度，超长截断").addText((t) =>
-      t.setValue(String(s.values.mentionMaxChars)).onChange(async (v) => {
+    new Setting(containerEl).setName(t("settings.mentionMaxCharsName")).setDesc(t("settings.mentionMaxCharsDesc")).addText((text) =>
+      text.setValue(String(s.values.mentionMaxChars)).onChange(async (v) => {
         const n = Number(v);
         if (Number.isFinite(n) && n > 0) {
           s.values.mentionMaxChars = Math.floor(n);
@@ -89,8 +91,8 @@ export class DshSettingTab extends PluginSettingTab {
       })
     );
 
-    new Setting(containerEl).setName("内联编辑超时（秒）").addText((t) =>
-      t.setValue(String(s.values.inlineEditTimeoutSec)).onChange(async (v) => {
+    new Setting(containerEl).setName(t("settings.inlineEditTimeoutName")).addText((text) =>
+      text.setValue(String(s.values.inlineEditTimeoutSec)).onChange(async (v) => {
         const n = Number(v);
         if (Number.isFinite(n) && n > 0) {
           s.values.inlineEditTimeoutSec = Math.floor(n);
@@ -99,8 +101,8 @@ export class DshSettingTab extends PluginSettingTab {
       })
     );
 
-    new Setting(containerEl).setName("历史页大小").setDesc("每次拉取会话历史的条数").addText((t) =>
-      t.setValue(String(s.values.historyPageSize)).onChange(async (v) => {
+    new Setting(containerEl).setName(t("settings.historyPageSizeName")).setDesc(t("settings.historyPageSizeDesc")).addText((text) =>
+      text.setValue(String(s.values.historyPageSize)).onChange(async (v) => {
         const n = Number(v);
         if (Number.isFinite(n) && n > 0) {
           s.values.historyPageSize = Math.floor(n);
@@ -109,8 +111,8 @@ export class DshSettingTab extends PluginSettingTab {
       })
     );
 
-    new Setting(containerEl).setName("重置内联编辑专用会话").setDesc("下次内联编辑将创建全新会话").addButton((b) =>
-      b.setButtonText("重置").onClick(async () => {
+    new Setting(containerEl).setName(t("settings.resetSessionName")).setDesc(t("settings.resetSessionDesc")).addButton((b) =>
+      b.setButtonText(t("settings.resetButton")).onClick(async () => {
         s.values.inlineEditSessionId = "";
         await s.save();
       })

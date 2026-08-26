@@ -8,6 +8,8 @@ export interface SessionManagerDeps {
   store: SessionStore;
   vaultPath: string;
   settings: DshSettings;
+  /** 本地化函数；用于会话标题回退等 UI 文案。 */
+  t: (key: string, params?: Record<string, string | number>) => string;
 }
 
 export class SessionManager {
@@ -31,7 +33,8 @@ export class SessionManager {
 
   private displayTitle(s: SessionSummary): string {
     const title = s.projections?.values?.title;
-    return typeof title === "string" && title.length > 0 ? title : `会话 ${s.sessionId.slice(0, 8)}`;
+    if (typeof title === "string" && title.length > 0) return title;
+    return this.deps.t("chat.sessionFallback", { id: s.sessionId.slice(0, 8) });
   }
 
   /** 拉取会话列表；vault 绑定置顶，其余按 updatedAt 降序。 */
@@ -50,7 +53,8 @@ export class SessionManager {
 
   sessionTitle(sessionId: string): string {
     const summary = this.sessions.find((s) => s.sessionId === sessionId);
-    return summary ? this.displayTitle(summary) : `会话 ${sessionId.slice(0, 8)}`;
+    if (summary) return this.displayTitle(summary);
+    return this.deps.t("chat.sessionFallback", { id: sessionId.slice(0, 8) });
   }
 
   /** 创建 cwd=vault 的新会话。 */

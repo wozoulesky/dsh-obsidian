@@ -10,10 +10,12 @@ import { InlineEditService } from "./core/inlineEdit";
 import { DshChatView, VIEW_TYPE_DSH_CHAT } from "./ui/chatView";
 import { InlineEditModal } from "./ui/inlineEditModal";
 import { DshSettingTab } from "./ui/settingsTab";
+import { I18n, loadI18n } from "./i18n";
 
 export interface DshRuntime {
   plugin: DshPlugin;
   settings: DshSettings;
+  i18n: I18n;
   client: DshClient;
   mux: MuxStream;
   store: SessionStore;
@@ -33,13 +35,18 @@ export default class DshPlugin extends Plugin {
     await this.settings.load();
     this.statusBarEl = this.addStatusBarItem();
 
+    const i18n = await loadI18n(
+      this.manifest.dir ?? `.obsidian/plugins/${this.manifest.id}`,
+      (path) => this.app.vault.adapter.read(path)
+    );
     const client = new DshClient({ baseUrl: this.settings.dshUrl });
     const store = new SessionStore();
     const approvals = new ApprovalCenter(client);
-    const manager = new SessionManager({ client, store, vaultPath: this.vaultPath(), settings: this.settings });
+    const manager = new SessionManager({ client, store, vaultPath: this.vaultPath(), settings: this.settings, t: (key, params) => i18n.t(key, params) });
     const runtime: DshRuntime = {
       plugin: this,
       settings: this.settings,
+      i18n,
       client,
       store,
       manager,
@@ -55,7 +62,7 @@ export default class DshPlugin extends Plugin {
       },
       onState: (state) => {
         runtime.muxState = state;
-        this.statusBarEl.setText(state === "connected" ? "DSH 已连接" : "DSH 重连中…");
+        this.statusBarEl.setText(state === "connected" ? i18n.t("main.statusConnected") : i18n.t("main.statusReconnecting"));
         if (state === "connected") {
           void (async () => {
             const targets = new Set<string>();
@@ -70,15 +77,15 @@ export default class DshPlugin extends Plugin {
       },
     });
     runtime.mux = mux;
-    runtime.inlineEdit = new InlineEditService({ manager, store, settings: this.settings });
+    runtime.inlineEdit = new InlineEditService({ manager, store, settings: this.settings, t: (key, params) => i18n.t(key, params) });
     this.runtime = runtime;
 
     this.registerView(VIEW_TYPE_DSH_CHAT, (leaf: WorkspaceLeaf) => new DshChatView(leaf, runtime));
-    this.addRibbonIcon("bot", "打开 DSH 面板", () => void this.activateView());
-    this.addCommand({ id: "open-panel", name: "打开 DSH 面板", callback: () => void this.activateView() });
+    this.addRibbonIcon("bot", i18n.t("main.openPanel"), () => void this.activateView());
+    this.addCommand({ id: "open-panel", name: i18n.t("main.openPanel"), callback: () => void this.activateView() });
     this.addCommand({
       id: "new-session",
-      name: "新建 DSH 会话",
+      name: i18n.t("main.newSession"),
       callback: async () => {
         try {
           await manager.newSession();
@@ -86,13 +93,13 @@ export default class DshPlugin extends Plugin {
           const view = this.app.workspace.getLeavesOfType(VIEW_TYPE_DSH_CHAT)[0]?.view;
           if (view instanceof DshChatView) view.refreshHeader();
         } catch (err) {
-          new Notice(`新建会话失败：${err instanceof Error ? err.message : String(err)}`);
+          new Notice(i18n.t("main.newSessionFailed", { message: err instanceof Error ? err.message : String(err) }));
         }
       },
     });
     this.addCommand({
       id: "inline-edit",
-      name: "DSH 内联编辑选区",
+      name: i18n.t("main.inlineEdit"),
       editorCallback: (editor: Editor) => new InlineEditModal(this.app, this.runtime, editor).open(),
     });
     this.addSettingTab(new DshSettingTab(this.app, this));
@@ -111,7 +118,7 @@ export default class DshPlugin extends Plugin {
     if (!leaf) {
       const right = workspace.getRightLeaf(false);
       if (!right) {
-        new Notice("无法打开 DSH 面板：右侧栏不可用");
+        new Notice(this.runtime.i18n.t("main.openPanelFailed"));
         return;
       }
       await right.setViewState({ type: VIEW_TYPE_DSH_CHAT, active: true });

@@ -1,14 +1,13 @@
 export interface BuiltinCommand {
   name: string;
-  description: string;
 }
 
 /** v1 内置命令清单（与 DSH 内置命令对齐；服务端执行，插件只负责联想与发送）。 */
 export const BUILTIN_COMMANDS: BuiltinCommand[] = [
-  { name: "/plan", description: "进入计划模式（/plan off 退出）" },
-  { name: "/compact", description: "压缩会话历史" },
-  { name: "/feedback", description: "给最近的回复打分反馈" },
-  { name: "/goal", description: "管理长期目标（/goal create <目标>）" },
+  { name: "/plan" },
+  { name: "/compact" },
+  { name: "/feedback" },
+  { name: "/goal" },
 ];
 
 const MENTION_RE = /@(?:file|folder):([^\s@]+)/g;

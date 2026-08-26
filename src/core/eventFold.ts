@@ -132,7 +132,8 @@ export function foldEvent(view: SessionView, event: SessionEvent): void {
       view.lastTurnEndSeq = event.seq;
       const reason = data.reason as { kind?: string; error?: { message?: string; code?: string } };
       if (reason?.kind === "error") {
-        view.nodes.push({ kind: "error", id: `err-${event.seq}`, text: `回合错误：${reason.error?.message ?? "未知错误"}`, seq: event.seq });
+        // 只存服务端错误正文；本地化前缀由 UI 层渲染（见 chatView）。
+        view.nodes.push({ kind: "error", id: `err-${event.seq}`, text: reason.error?.message ?? "未知错误", seq: event.seq });
       }
       const node = lastAssistant(view);
       if (node) {

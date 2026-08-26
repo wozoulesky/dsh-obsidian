@@ -2,6 +2,7 @@ import { App, Editor, Modal, Notice, Setting } from "obsidian";
 import { wordDiff } from "../core/wordDiff";
 import { DiffPreviewModal } from "./diffPreview";
 import type { DshRuntime } from "../main";
+import type { I18n } from "../i18n";
 
 const LARGE_DIFF_CHARS = 10000;
 
@@ -21,16 +22,16 @@ export class InlineEditModal extends Modal {
   onOpen(): void {
     const selection = this.editor.getSelection();
     if (selection.trim().length === 0) {
-      this.contentEl.createEl("p", { text: "请先在编辑器中选择要修改的文本。" });
+      this.contentEl.createEl("p", { text: this.runtime.i18n.t("inline.promptNoSelection") });
       return;
     }
-    this.titleEl.setText("DSH 内联编辑");
-    this.contentEl.createEl("p", { text: `已选择 ${selection.length} 个字符，输入修改指令：` });
-    const input = this.contentEl.createEl("input", { attr: { type: "text", placeholder: "例如：改写得更简洁" } });
+    this.titleEl.setText(this.runtime.i18n.t("inline.title"));
+    this.contentEl.createEl("p", { text: this.runtime.i18n.t("inline.selectedChars", { count: selection.length }) });
+    const input = this.contentEl.createEl("input", { attr: { type: "text", placeholder: this.runtime.i18n.t("inline.placeholder") } });
     input.value = this.instruction;
     input.addEventListener("input", () => (this.instruction = input.value));
     new Setting(this.contentEl).addButton((b) =>
-      b.setButtonText("开始").setCta().onClick(() => void this.run(b))
+      b.setButtonText(this.runtime.i18n.t("inline.start")).setCta().onClick(() => void this.run(b))
     );
   }
 
@@ -44,28 +45,28 @@ export class InlineEditModal extends Modal {
     button.setDisabled(true);
     const selection = this.editor.getSelection();
     const path = this.runtime.plugin.app.workspace.getActiveFile()?.path ?? "";
-    const notice = new Notice("DSH 正在生成修改…", 0);
+    const notice = new Notice(this.runtime.i18n.t("inline.generating"), 0);
     try {
-      const result = await this.runtime.inlineEdit.edit(selection, path, this.instruction || "优化这段文本");
+      const result = await this.runtime.inlineEdit.edit(selection, path, this.instruction || this.runtime.i18n.t("inline.defaultInstruction"));
       notice.hide();
       if (this.closed) return; // 用户已关闭弹窗：丢弃结果
       if (result.trim() === selection.trim()) {
         // 模型未做实质修改（如指令是询问式），给出明确反馈而非空 diff
-        new Notice("DSH 返回的内容与原文一致，未发生修改");
+        new Notice(this.runtime.i18n.t("inline.sameContent"));
         this.close();
         return;
       }
       if (selection.length > LARGE_DIFF_CHARS || result.length > LARGE_DIFF_CHARS) {
         // 超大内容跳过词级 diff（O(n·m) 内存），直接确认替换
-        new ConfirmReplaceModal(this.app, () => this.apply(selection, result)).open();
+        new ConfirmReplaceModal(this.app, () => this.apply(selection, result), this.runtime.i18n).open();
       } else {
-        new DiffPreviewModal(this.app, wordDiff(selection, result), () => this.apply(selection, result)).open();
+        new DiffPreviewModal(this.app, wordDiff(selection, result), () => this.apply(selection, result), this.runtime.i18n).open();
       }
       this.close();
     } catch (err) {
       notice.hide();
       if (!this.closed) {
-        new Notice(`内联编辑失败：${err instanceof Error ? err.message : String(err)}`);
+        new Notice(this.runtime.i18n.t("inline.editFailed", { message: err instanceof Error ? err.message : String(err) }));
       }
       this.close();
     }
@@ -75,7 +76,7 @@ export class InlineEditModal extends Modal {
   private apply(selection: string, result: string): void {
     const active = this.runtime.plugin.app.workspace.activeEditor?.editor;
     if (!active || active !== this.editor || active.getSelection() !== selection) {
-      new Notice("编辑器选区已变化，未应用替换");
+      new Notice(this.runtime.i18n.t("inline.selectionChanged"));
       return;
     }
     active.replaceSelection(result);
@@ -84,17 +85,21 @@ export class InlineEditModal extends Modal {
 
 /** 超大内容的简易确认替换弹窗（无 diff 预览）。 */
 export class ConfirmReplaceModal extends Modal {
-  constructor(app: App, private onApply: () => void) {
+  constructor(
+    app: App,
+    private onApply: () => void,
+    private i18n: I18n
+  ) {
     super(app);
   }
 
   onOpen(): void {
-    this.titleEl.setText("内联编辑完成");
-    this.contentEl.createEl("p", { text: "内容较大，已跳过词级预览。确认替换所选内容？" });
+    this.titleEl.setText(this.i18n.t("inline.doneTitle"));
+    this.contentEl.createEl("p", { text: this.i18n.t("inline.largeDiffConfirm") });
     const bar = this.contentEl.createDiv();
-    const cancel = bar.createEl("button", { text: "放弃" });
+    const cancel = bar.createEl("button", { text: this.i18n.t("common.cancel") });
     cancel.addEventListener("click", () => this.close());
-    const apply = bar.createEl("button", { text: "应用替换" });
+    const apply = bar.createEl("button", { text: this.i18n.t("common.apply") });
     apply.addEventListener("click", () => {
       this.onApply();
       this.close();

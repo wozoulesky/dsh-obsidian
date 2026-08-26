@@ -67,7 +67,7 @@ function makeManager() {
   const client = new DshClient({ baseUrl });
   const store = new SessionStore();
   const settings = { values: { historyPageSize: 50 } } as unknown as DshSettings;
-  return { client, store, manager: new SessionManager({ client, store, vaultPath: "C:\\vault", settings }) };
+  return { client, store, manager: new SessionManager({ client, store, vaultPath: "C:\\vault", settings, t: (key) => key }) };
 }
 
 describe("SessionManager", () => {
@@ -91,7 +91,7 @@ describe("SessionManager", () => {
         },
       }),
     } as unknown as DshClient;
-    const manager = new SessionManager({ client: fakeClient, store: new SessionStore(), vaultPath: "/home/user/vault", settings: {} as DshSettings });
+    const manager = new SessionManager({ client: fakeClient, store: new SessionStore(), vaultPath: "/home/user/vault", settings: {} as DshSettings, t: (key) => key });
     await manager.refresh();
     expect(manager.sessions.map((s) => s.sessionId)).toEqual(["u2", "u1", "u4", "u3"]);
   });
