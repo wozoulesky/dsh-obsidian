@@ -37,7 +37,8 @@ export default class DshPlugin extends Plugin {
       this.statusBarEl = this.addStatusBarItem();
 
       const i18n = await loadI18n(
-        this.manifest.dir ?? `.obsidian/plugins/${this.manifest.id}`,
+        // 优先级：vault 根 dsh-bridge.i18n.json（用户可见可编辑，TASK-015）→ 插件目录 i18n.json（兼容旧路径）
+        ["dsh-bridge.i18n.json", `${this.manifest.dir ?? `.obsidian/plugins/${this.manifest.id}`}/i18n.json`],
         (path) => this.app.vault.adapter.read(path)
       );
       const client = new DshClient({ baseUrl: this.settings.dshUrl });

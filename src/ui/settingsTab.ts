@@ -1,5 +1,5 @@
-import { App, PluginSettingTab, Setting, type SettingDefinitionItem } from "obsidian";
-import type { I18nParams } from "../i18n";
+import { App, Notice, PluginSettingTab, Setting, type SettingDefinitionItem } from "obsidian";
+import { DEFAULT_STRINGS, type I18nParams } from "../i18n";
 import type DshPlugin from "../main";
 
 export class DshSettingTab extends PluginSettingTab {
@@ -46,6 +46,24 @@ export class DshSettingTab extends PluginSettingTab {
             void (async () => {
               s.values.inlineEditSessionId = "";
               await s.save();
+            })();
+          });
+        },
+      },
+      {
+        name: t("settings.exportI18nName"),
+        desc: t("settings.exportI18nDesc"),
+        action: (el) => {
+          const btn = el.createEl("button", { text: t("settings.exportI18nButton") });
+          btn.addEventListener("click", () => {
+            void (async () => {
+              try {
+                // 导出到 vault 根：Obsidian 文件树可见可编辑，用户不接触 .obsidian 隐藏目录
+                await this.plugin.app.vault.adapter.write("dsh-bridge.i18n.json", JSON.stringify(DEFAULT_STRINGS, null, 2));
+                new Notice(t("settings.exportI18nDone"));
+              } catch (err) {
+                new Notice(t("settings.exportI18nFailed", { message: err instanceof Error ? err.message : String(err) }));
+              }
             })();
           });
         },
@@ -117,6 +135,17 @@ export class DshSettingTab extends PluginSettingTab {
       b.setButtonText(t("settings.resetButton")).onClick(async () => {
         s.values.inlineEditSessionId = "";
         await s.save();
+      })
+    );
+
+    new Setting(containerEl).setName(t("settings.exportI18nName")).setDesc(t("settings.exportI18nDesc")).addButton((b) =>
+      b.setButtonText(t("settings.exportI18nButton")).onClick(async () => {
+        try {
+          await this.plugin.app.vault.adapter.write("dsh-bridge.i18n.json", JSON.stringify(DEFAULT_STRINGS, null, 2));
+          new Notice(t("settings.exportI18nDone"));
+        } catch (err) {
+          new Notice(t("settings.exportI18nFailed", { message: err instanceof Error ? err.message : String(err) }));
+        }
       })
     );
   }

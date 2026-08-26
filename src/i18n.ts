@@ -92,6 +92,11 @@ export const DEFAULT_STRINGS: Record<string, string> = {
   "settings.resetSessionName": "重置内联编辑专用会话",
   "settings.resetSessionDesc": "下次内联编辑将创建全新会话",
   "settings.resetButton": "重置",
+  "settings.exportI18nName": "导出 i18n 翻译模板",
+  "settings.exportI18nDesc": "在 vault 根目录生成 dsh-bridge.i18n.json（Obsidian 可见可编辑），翻译后重载插件生效；优先于插件目录 i18n.json",
+  "settings.exportI18nButton": "导出",
+  "settings.exportI18nDone": "已导出 dsh-bridge.i18n.json 到 vault 根目录，翻译后重载插件生效",
+  "settings.exportI18nFailed": "导出失败：{message}",
 
   // 内置命令联想
   "command.plan.desc": "进入计划模式（/plan off 退出）",
@@ -115,23 +120,27 @@ export class I18n {
   }
 }
 
-/** 读取插件目录下的 i18n.json；文件缺失或解析失败时回落默认值，不抛错。 */
+/**
+ * 按候选路径顺序读取外部 i18n 文件（vault 根优先、插件目录兼容），
+ * 第一个读取成功且解析为 JSON 对象的使用；读取失败/非法 JSON/非对象 → 尝试下一个；全部失败 → 内置默认（不抛错）。
+ */
 export async function loadI18n(
-  pluginDirPath: string,
+  candidatePaths: string[],
   read: (path: string) => Promise<string>
 ): Promise<I18n> {
-  try {
-    const raw = await read(`${pluginDirPath}/i18n.json`);
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      return new I18n();
+  for (const path of candidatePaths) {
+    try {
+      const raw = await read(path);
+      const parsed: unknown = JSON.parse(raw);
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) continue;
+      const overrides: Record<string, string> = {};
+      for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof value === "string") overrides[key] = value;
+      }
+      return new I18n(overrides);
+    } catch {
+      continue; // 文件缺失/读取失败/解析失败：尝试下一个候选
     }
-    const overrides: Record<string, string> = {};
-    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-      if (typeof value === "string") overrides[key] = value;
-    }
-    return new I18n(overrides);
-  } catch {
-    return new I18n();
   }
+  return new I18n();
 }

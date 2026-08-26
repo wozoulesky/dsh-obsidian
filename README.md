@@ -39,13 +39,13 @@ All data flows through your local DSH to its configured model providers, using t
 
 ## Translations / Localization
 
-The plugin ships with all UI strings in a key-value table. To translate it into your own language:
+The plugin ships with all UI strings in a key-value table (built-in default: Chinese). To switch the UI to another language:
 
-1. Copy `i18n.template.json` from the repository or the latest release into the plugin directory as `i18n.json` (`.obsidian/plugins/dsh-bridge/i18n.json`).
-2. Hand the file to your local DSH (or another translator) and replace the values after the colon.
-3. Reload Obsidian (or disable/enable the plugin) to apply.
+1. In the plugin settings tab, click **Export i18n template** — this creates `dsh-bridge.i18n.json` at the **root of your vault** (visible in Obsidian's file explorer).
+2. Replace the values with your translations (or hand the file to your local DSH / any translator).
+3. Reload Obsidian (or disable/enable the plugin) to apply — repeatable.
 
-Missing keys or invalid JSON fall back to the built-in defaults silently. In v0.1.x, model-facing instructions (inline-edit prompt, @mention expansion) intentionally remain in Chinese; the UI-only string table is safe to translate.
+The vault-root file takes priority; a legacy `i18n.json` inside the plugin directory (`.obsidian/plugins/dsh-bridge/`) is still read as a fallback. Missing keys or invalid JSON silently fall back to the built-in defaults. In v0.1.x, model-facing instructions (inline-edit prompt, @mention expansion) intentionally remain in Chinese; the UI-only string table is safe to translate.
 
 ## Development
 
