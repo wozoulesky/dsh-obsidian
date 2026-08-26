@@ -6,3 +6,6 @@ data.json
 docs/superpowers/
 # æœ¬åœ°æ’éšœå·¥å…·ï¼ˆstub åŠ è½½ main.jsï¼Œä»…é™æœ¬æœºï¼‰
 debug-*.cjs
+
+# release tgz ²»Èë¿â£¨GitHub Release ¸½¼ş£©
+*.tgz
