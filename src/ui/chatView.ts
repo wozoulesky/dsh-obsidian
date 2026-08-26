@@ -29,6 +29,9 @@ export class DshChatView extends ItemView {
   private nodesEl!: HTMLElement;
   private runningEl!: HTMLElement;
   private emptyEl!: HTMLElement;
+  /** 「加载更早」进行中标志（防双击并发重复前插）；null=未知，false=无更多。 */
+  private olderLoading = false;
+  private olderHasMore: boolean | null = null;
 
   constructor(leaf: WorkspaceLeaf, private runtime: DshRuntime) {
     super(leaf);
@@ -63,12 +66,19 @@ export class DshChatView extends ItemView {
     this.olderBtn.addEventListener("click", () => {
       void (async () => {
         const view = this.view;
-        if (!view) return;
+        if (!view || this.olderLoading) return; // 加载中或已在处理，防重复前插
+        this.olderLoading = true;
+        this.olderBtn.setText(this.runtime.i18n.t("chat.loadingOlder"));
         try {
-          await this.runtime.manager.loadOlder(view.sessionId);
+          const hasMore = await this.runtime.manager.loadOlder(view.sessionId);
+          this.olderHasMore = hasMore;
           this.renderNow();
         } catch (err) {
           new Notice(this.runtime.i18n.t("chat.loadFailed", { message: err instanceof Error ? err.message : String(err) }));
+        } finally {
+          this.olderLoading = false;
+          this.olderBtn.setText(this.runtime.i18n.t("chat.older"));
+          if (this.olderHasMore === false) this.olderBtn.style.display = "none"; // 已无更早内容才隐藏，避免「点了没反应」的错觉
         }
       })();
     });
@@ -273,7 +283,7 @@ export class DshChatView extends ItemView {
       this.nodesEl.empty();
     }
 
-    this.olderBtn.style.display = "";
+    this.olderBtn.style.display = this.olderHasMore === false ? "none" : "";
     this.runningEl.style.display = view.running ? "" : "none";
     this.emptyEl.style.display = "none";
 
@@ -287,6 +297,9 @@ export class DshChatView extends ItemView {
         // 复用已有 DOM：appendChild 会按当前遍历顺序移动，保证「加载更早」前插、节点顺序正确。
         this.nodesEl.appendChild(cached.el);
       } else {
+        // 签名变化：先销毁旧 DOM！否则流式期间每个 chunk 都会残留一条重复消息
+        //（旧节点未移除 → 消息列表无限增长 → CLS/INP 恶化、视口内容上跳）
+        cached?.el.remove();
         const el = this.buildNodeEl(node);
         this.nodeCache.set(key, { el, sig });
         this.nodesEl.appendChild(el);
@@ -329,8 +342,14 @@ export class DshChatView extends ItemView {
     const wrap = document.createElement("div");
     wrap.className = "dsh-msg-assistant";
     const body = wrap.createDiv();
-    const text = node.text.length > 0 ? node.text : (node.streaming ? "…" : this.runtime.i18n.t("chat.noText"));
-    void MarkdownRenderer.render(this.app, text, body, "", this);
+    if (node.streaming) {
+      // 流式中：纯文本即时更新（setText 极轻），Markdown 只在结束时渲染一次——
+      // 避免每个 chunk 都全量解析 Markdown（阻塞主线程 → INP 高）与异步渲染撑开高度（CLS）。
+      body.setText(node.text.length > 0 ? node.text : "…");
+    } else {
+      const text = node.text.length > 0 ? node.text : this.runtime.i18n.t("chat.noText");
+      void MarkdownRenderer.render(this.app, text, body, "", this);
+    }
     for (const card of node.toolCards) {
       const details = wrap.createEl("details", { cls: "dsh-tool-card" });
       const suffix = card.status === "running" ? this.runtime.i18n.t("chat.toolRunning") : card.status === "error" ? this.runtime.i18n.t("chat.toolError") : "";

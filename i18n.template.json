@@ -12,6 +12,7 @@
   "chat.new": "新建",
   "chat.stop": "停止",
   "chat.older": "加载更早",
+  "chat.loadingOlder": "加载中…",
   "chat.listLoadFailed": "会话列表拉取失败：{message}",
   "chat.openFailed": "打开会话失败：{message}",
   "chat.pleaseCreateSession": "请先创建会话",
