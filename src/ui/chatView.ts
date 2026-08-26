@@ -282,6 +282,8 @@ export class DshChatView extends ItemView {
       this.cachedSessionId = view.sessionId;
       this.nodeCache.clear();
       this.nodesEl.empty();
+      // 「加载更早」状态是会话相关的：切会话后重置，避免旧会话的 hasMore=false 把按钮带没了
+      this.olderHasMore = null;
     }
 
     this.olderBtn.style.visibility = this.olderHasMore === false ? "hidden" : "visible";
