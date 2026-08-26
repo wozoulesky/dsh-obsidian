@@ -4,6 +4,8 @@
 .dsh-chat-messages { flex: 1 1 auto; overflow-y: auto; padding: 8px; }
 .dsh-msg-user { background: var(--background-secondary); border-radius: 8px; padding: 6px 10px; margin: 6px 0; }
 .dsh-msg-assistant { margin: 6px 0; }
+/* 流式期间纯文本显示：pre-wrap 保留换行，行布局接近 Markdown 段落，降低结束渲染的 CLS */
+.dsh-streaming-text { white-space: pre-wrap; line-height: var(--line-height-normal); }
 .dsh-msg-context { font-size: 0.85em; color: var(--text-muted); border-left: 2px solid var(--background-modifier-border); padding-left: 8px; margin: 4px 0; }
 .dsh-msg-command { font-size: 0.9em; color: var(--text-accent); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 4px 8px; margin: 6px 0; }
 .dsh-tool-card { border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 4px 8px; margin: 6px 0; font-size: 0.9em; }

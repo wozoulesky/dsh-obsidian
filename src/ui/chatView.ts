@@ -78,7 +78,8 @@ export class DshChatView extends ItemView {
         } finally {
           this.olderLoading = false;
           this.olderBtn.setText(this.runtime.i18n.t("chat.older"));
-          if (this.olderHasMore === false) this.olderBtn.style.display = "none"; // 已无更早内容才隐藏，避免「点了没反应」的错觉
+          // 用 visibility 隐藏而非 display：保留占位，避免消息列表整体上移贡献 CLS
+          if (this.olderHasMore === false) this.olderBtn.style.visibility = "hidden";
         }
       })();
     });
@@ -283,7 +284,7 @@ export class DshChatView extends ItemView {
       this.nodesEl.empty();
     }
 
-    this.olderBtn.style.display = this.olderHasMore === false ? "none" : "";
+    this.olderBtn.style.visibility = this.olderHasMore === false ? "hidden" : "visible";
     this.runningEl.style.display = view.running ? "" : "none";
     this.emptyEl.style.display = "none";
 
@@ -345,6 +346,8 @@ export class DshChatView extends ItemView {
     if (node.streaming) {
       // 流式中：纯文本即时更新（setText 极轻），Markdown 只在结束时渲染一次——
       // 避免每个 chunk 都全量解析 Markdown（阻塞主线程 → INP 高）与异步渲染撑开高度（CLS）。
+      // dsh-streaming-text: white-space: pre-wrap，换行布局接近 Markdown 段落，减小结束渲染的高度突变。
+      body.className = "dsh-streaming-text";
       body.setText(node.text.length > 0 ? node.text : "…");
     } else {
       const text = node.text.length > 0 ? node.text : this.runtime.i18n.t("chat.noText");
