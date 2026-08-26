@@ -40,23 +40,23 @@ export class DshSettingTab extends PluginSettingTab {
       {
         name: t("settings.resetSessionName"),
         desc: t("settings.resetSessionDesc"),
-        action: (el) => {
-          const btn = el.createEl("button", { text: t("settings.resetButton") });
-          btn.addEventListener("click", () => {
-            void (async () => {
+        // 注意：声明式 action 的语义是「点击行时调用」，不是渲染回调——在其中 createEl 会在
+        // 框架多次重渲染时累积重复按钮（真机 bug：导出按钮出现 4 个）。按钮类交互应使用 render。
+        render: (setting) => {
+          setting.addButton((b) =>
+            b.setButtonText(t("settings.resetButton")).onClick(async () => {
               s.values.inlineEditSessionId = "";
               await s.save();
-            })();
-          });
+            })
+          );
         },
       },
       {
         name: t("settings.exportI18nName"),
         desc: t("settings.exportI18nDesc"),
-        action: (el) => {
-          const btn = el.createEl("button", { text: t("settings.exportI18nButton") });
-          btn.addEventListener("click", () => {
-            void (async () => {
+        render: (setting) => {
+          setting.addButton((b) =>
+            b.setButtonText(t("settings.exportI18nButton")).onClick(async () => {
               try {
                 // 导出到 vault 根：Obsidian 文件树可见可编辑，用户不接触 .obsidian 隐藏目录
                 await this.plugin.app.vault.adapter.write("dsh-bridge.i18n.json", JSON.stringify(DEFAULT_STRINGS, null, 2));
@@ -64,8 +64,8 @@ export class DshSettingTab extends PluginSettingTab {
               } catch (err) {
                 new Notice(t("settings.exportI18nFailed", { message: err instanceof Error ? err.message : String(err) }));
               }
-            })();
-          });
+            })
+          );
         },
       },
     ];
