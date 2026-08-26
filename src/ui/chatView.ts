@@ -79,7 +79,7 @@ export class DshChatView extends ItemView {
           this.olderLoading = false;
           this.olderBtn.setText(this.runtime.i18n.t("chat.older"));
           // 用 visibility 隐藏而非 display：保留占位，避免消息列表整体上移贡献 CLS
-          if (this.olderHasMore === false) this.olderBtn.style.visibility = "hidden";
+          if (this.olderHasMore === false) this.olderBtn.addClass("dsh-hidden-visually");
         }
       })();
     });
@@ -290,9 +290,9 @@ export class DshChatView extends ItemView {
       this.cachedSessionId = null;
       this.nodeCache.clear();
       this.nodesEl.empty();
-      this.olderBtn.style.display = "none";
-      this.runningEl.style.display = "none";
-      this.emptyEl.style.display = "";
+      this.olderBtn.addClass("dsh-hidden");
+      this.runningEl.addClass("dsh-hidden");
+      this.emptyEl.removeClass("dsh-hidden");
       return;
     }
 
@@ -304,9 +304,9 @@ export class DshChatView extends ItemView {
       this.olderHasMore = null;
     }
 
-    this.olderBtn.style.visibility = this.olderHasMore === false ? "hidden" : "visible";
-    this.runningEl.style.display = view.running ? "" : "none";
-    this.emptyEl.style.display = "none";
+    this.olderBtn.toggleClass("dsh-hidden-visually", this.olderHasMore === false);
+    this.runningEl.toggleClass("dsh-hidden", !view.running);
+    this.emptyEl.addClass("dsh-hidden");
 
     const seen = new Set<string>();
     for (const node of view.nodes) {
@@ -339,35 +339,30 @@ export class DshChatView extends ItemView {
 
   /** 构建单条消息 DOM；与缓存解耦，返回元素供 renderNow 复用或重建。 */
   private buildNodeEl(node: ViewNode): HTMLElement {
+    // 统一用 this.nodesEl.createDiv（Obsidian helper 与社区审核规则 obsidianmd/prefer-create-el）；
+    // 创建即挂载到 nodesEl 末尾，renderNow 随后按遍历顺序 appendChild 调整，最终顺序正确，与缓存复用兼容。
     if (node.kind === "user") {
-      const el = document.createElement("div");
-      el.className = node.sourceKind === "user" ? "dsh-msg-user" : "dsh-msg-context";
-      el.setText(node.text);
-      return el;
+      return this.nodesEl.createDiv({ cls: node.sourceKind === "user" ? "dsh-msg-user" : "dsh-msg-context", text: node.text });
     }
     if (node.kind === "error") {
-      const el = document.createElement("div");
-      el.className = "dsh-msg-context";
-      el.setText(this.runtime.i18n.t("chat.turnError", { message: node.text }));
-      return el;
+      return this.nodesEl.createDiv({ cls: "dsh-msg-context", text: this.runtime.i18n.t("chat.turnError", { message: node.text }) });
     }
     if (node.kind === "command") {
-      const el = document.createElement("div");
-      el.className = "dsh-msg-command";
       const statusText = node.status === "running" ? "⏳" : node.status === "success" ? "✓" : "✗";
-      el.setText(node.text
-        ? this.runtime.i18n.t("chat.commandLineWithText", { status: statusText, name: node.name, text: node.text })
-        : this.runtime.i18n.t("chat.commandLine", { status: statusText, name: node.name }));
-      return el;
+      return this.nodesEl.createDiv({
+        cls: "dsh-msg-command",
+        text: node.text
+          ? this.runtime.i18n.t("chat.commandLineWithText", { status: statusText, name: node.name, text: node.text })
+          : this.runtime.i18n.t("chat.commandLine", { status: statusText, name: node.name }),
+      });
     }
-    const wrap = document.createElement("div");
-    wrap.className = "dsh-msg-assistant";
+    const wrap = this.nodesEl.createDiv({ cls: "dsh-msg-assistant" });
     const body = wrap.createDiv();
     if (node.streaming) {
       // 流式中：纯文本即时更新（setText 极轻），Markdown 只在结束时渲染一次——
       // 避免每个 chunk 都全量解析 Markdown（阻塞主线程 → INP 高）与异步渲染撑开高度（CLS）。
       // dsh-streaming-text: white-space: pre-wrap，换行布局接近 Markdown 段落，减小结束渲染的高度突变。
-      body.className = "dsh-streaming-text";
+      body.addClass("dsh-streaming-text");
       body.setText(node.text.length > 0 ? node.text : "…");
     } else {
       const text = node.text.length > 0 ? node.text : this.runtime.i18n.t("chat.noText");
