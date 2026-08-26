@@ -72,6 +72,8 @@
   "settings.resetSessionName": "重置内联编辑专用会话",
   "settings.resetSessionDesc": "下次内联编辑将创建全新会话",
   "settings.resetButton": "重置",
+  "settings.resetDone": "已重置：下次内联编辑将创建全新会话",
+  "settings.resetFailed": "重置失败：{message}",
   "settings.exportI18nName": "导出 i18n 翻译模板",
   "settings.exportI18nDesc": "在 vault 根目录生成 dsh-bridge.i18n.json（Obsidian 可见可编辑），翻译后重载插件生效；优先于插件目录 i18n.json",
   "settings.exportI18nButton": "导出",

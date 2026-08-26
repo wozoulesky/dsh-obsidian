@@ -45,8 +45,13 @@ export class DshSettingTab extends PluginSettingTab {
         render: (setting) => {
           setting.addButton((b) =>
             b.setButtonText(t("settings.resetButton")).onClick(async () => {
-              s.values.inlineEditSessionId = "";
-              await s.save();
+              try {
+                s.values.inlineEditSessionId = "";
+                await s.save();
+                new Notice(t("settings.resetDone"));
+              } catch (err) {
+                new Notice(t("settings.resetFailed", { message: err instanceof Error ? err.message : String(err) }));
+              }
             })
           );
         },
@@ -133,8 +138,13 @@ export class DshSettingTab extends PluginSettingTab {
 
     new Setting(containerEl).setName(t("settings.resetSessionName")).setDesc(t("settings.resetSessionDesc")).addButton((b) =>
       b.setButtonText(t("settings.resetButton")).onClick(async () => {
-        s.values.inlineEditSessionId = "";
-        await s.save();
+        try {
+          s.values.inlineEditSessionId = "";
+          await s.save();
+          new Notice(t("settings.resetDone"));
+        } catch (err) {
+          new Notice(t("settings.resetFailed", { message: err instanceof Error ? err.message : String(err) }));
+        }
       })
     );
 
