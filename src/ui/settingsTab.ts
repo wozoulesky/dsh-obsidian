@@ -1,4 +1,5 @@
 import { App, PluginSettingTab, Setting, type SettingDefinitionItem } from "obsidian";
+import type { I18nParams } from "../i18n";
 import type DshPlugin from "../main";
 
 export class DshSettingTab extends PluginSettingTab {
@@ -9,7 +10,8 @@ export class DshSettingTab extends PluginSettingTab {
   /** Obsidian 1.13+ 声明式设置定义（可被设置搜索索引）。 */
   getSettingDefinitions(): SettingDefinitionItem[] {
     const s = this.plugin.settings;
-    const t = this.plugin.runtime.i18n.t;
+    // 注意：必须箭头函数包装，裸提取 i18n.t 会丢失 this 导致 overrides 读取崩溃（真机回归，见 TASK-013/014 handoff）。
+    const t = (key: string, params?: I18nParams) => this.plugin.runtime.i18n.t(key, params);
     return [
       {
         name: t("settings.dshUrlName"),
@@ -72,7 +74,7 @@ export class DshSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     const s = this.plugin.settings;
-    const t = this.plugin.runtime.i18n.t;
+    const t = (key: string, params?: I18nParams) => this.plugin.runtime.i18n.t(key, params);
 
     new Setting(containerEl).setName(t("settings.dshUrlName")).setDesc(t("settings.dshUrlDesc")).addText((text) =>
       text.setValue(s.values.dshUrl).onChange(async (v) => {

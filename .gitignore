@@ -4,3 +4,5 @@ main.js
 data.json
 # 内部开发文档（superpowers 流程产物），不上传 GitHub
 docs/superpowers/
+# 本地排障工具（stub 加载 main.js，仅限本机）
+debug-*.cjs
