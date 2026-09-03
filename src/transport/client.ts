@@ -1,6 +1,40 @@
+/**
+ * DSH 0.1.2-rc.1 客户端（批 2：RPC 层）。
+ *
+ * 契约事实（对照本机 0.1.2-rc.1 官方源码 + 真机实测核实）：
+ * - 一元 RPC：POST /api/<namespace>/<method>（斜杠端点）；信封
+ *   {type:"client-request", rpcId, method, payload:{args:{...}}}；args 键集合与描述符精确一致，
+ *   多余/缺失键被 gateway/arguments-invalid 拒绝。
+ * - 认证：请求携带 browser-session 自签 cookie（DshCookieAuth，批 1）。认证失败（DshAuthError）明确传播。
+ * - $events/result：waterfall 应答一元 RPC，args {clientId, eventId, outcome}（三态）。
+ * - 事件流（batch 3 实现）：openStream(endpoint, args) 走 WS remote.mux 打开流端点，
+ *   本批只定义接口形状，实现为明确 TODO 占位。
+ */
 import * as http from "http";
 import * as https from "https";
-import { mintId, isServerResponse, type ClientRequest, type ClientResponse, type RpcResult, type RpcReceipt, type HistoryPayload, type HistoryResult, type PromptPayload, type PromptResult, type SessionCreatePayload, type SessionCreateResult, type SessionListResult, type CancelPayload, type CancelResult } from "./types";
+import {
+  mintId,
+  isServerResponse,
+  type CancelPayload,
+  type CancelResult,
+  type ClientRequest,
+  type PromptPayload,
+  type PromptRequestInput,
+  type PromptResult,
+  type RemoteEventOutcome,
+  type RemoteEventResultArgs,
+  type RpcResult,
+  type SessionCreatePayload,
+  type SessionCreateResult,
+  type SessionListResult,
+  type SessionPage,
+  type SessionPageRequest,
+  type SessionEvent,
+  type HistoryPayload,
+  type HistoryResult,
+  type RpcReceipt,
+} from "./types";
+import { DshAuthError, type DshCookieAuth } from "./auth";
 import { clearTimer, setTimer } from "../utils/timers";
 
 export class TransportFailure extends Error {
@@ -10,8 +44,23 @@ export class TransportFailure extends Error {
   }
 }
 
-/** Node http/https POST，返回响应文本；非 2xx 或提前断开抛 TransportFailure；硬超时兜底。 */
-export function postJson(url: string, body: string, timeoutMs: number): Promise<string> {
+/** openStream 在批 3 才实现（mux 帧协议）；本批调用即抛此错误，避免与批 3 抢文件。 */
+export class StreamNotImplementedError extends Error {
+  constructor(readonly endpoint: string) {
+    super(`openStream(${endpoint}) 未实现：remote.mux 帧协议在批 3 交付`);
+    this.name = "StreamNotImplementedError";
+  }
+}
+
+export interface PostJsonHeaders {
+  [name: string]: string | number | undefined;
+}
+
+/**
+ * Node http/https POST，返回响应文本；非 2xx 或提前断开抛 TransportFailure；硬超时兜底。
+ * headers 用于注入 Cookie（批 1 的 DshCookieAuth.cookieHeader()）；保持向后兼容的默认参数。
+ */
+export function postJson(url: string, body: string, timeoutMs: number, headers?: PostJsonHeaders): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     let settled = false;
     let deadline: ReturnType<typeof setTimeout> | null = null;
@@ -34,6 +83,7 @@ export function postJson(url: string, body: string, timeoutMs: number): Promise<
           headers: {
             "content-type": "application/json",
             "content-length": Buffer.byteLength(body),
+            ...(headers ?? {}),
           },
         },
         (res) => {
@@ -69,17 +119,34 @@ export function postJson(url: string, body: string, timeoutMs: number): Promise<
 export interface DshClientOptions {
   baseUrl: string;
   timeoutMs?: number;
+  /** 批 1 的 cookie 认证器；缺省时不带 Cookie（仅单测/裸探测用，真机必须注入）。 */
+  auth?: DshCookieAuth;
+  /** 测试注入：cookieHeader 函数（返回完整 Cookie 头值，不含 Cookie: 前缀）。 */
+  cookieHeader?: () => Promise<string>;
 }
 
 export class DshClient {
   constructor(private opts: DshClientOptions) {}
 
-  /** 通用一元调用：铸造 rpcId → POST /api/<method> → 校验回显 → 返回 result。 */
-  async call<T>(method: string, payload: unknown, overrides?: { forceRpcId?: string }): Promise<RpcResult<T>> {
+  private async authHeader(): Promise<PostJsonHeaders> {
+    if (this.opts.cookieHeader) return { cookie: await this.opts.cookieHeader() };
+    if (this.opts.auth) return { cookie: await this.opts.auth.cookieHeader() };
+    return {};
+  }
+
+  /** 通用一元调用：铸造 rpcId → POST /api/<method>（payload 已包 {args:{...}}）→ 校验回显 → 返回 result。 */
+  async call<T>(method: string, args: Record<string, unknown>, overrides?: { forceRpcId?: string }): Promise<RpcResult<T>> {
     const rpcId = overrides?.forceRpcId ?? mintId();
-    const request: ClientRequest = { type: "client-request", rpcId, method, payload };
+    const request: ClientRequest = { type: "client-request", rpcId, method, payload: { args } };
     const timeoutMs = this.opts.timeoutMs ?? 30000;
-    const text = await postJson(`${this.opts.baseUrl}/api/${method}`, JSON.stringify(request), timeoutMs);
+    let headers: PostJsonHeaders;
+    try {
+      headers = await this.authHeader();
+    } catch (err) {
+      // 认证失败（DshAuthError）明确传播，不静默吞：上层据此提示「DSH 凭据不可读」
+      throw err instanceof DshAuthError ? err : new DshAuthError(err instanceof Error ? err.message : String(err), err);
+    }
+    const text = await postJson(`${this.opts.baseUrl}/api/${method}`, JSON.stringify(request), timeoutMs, headers);
     let full: unknown;
     try {
       full = JSON.parse(text);
@@ -109,39 +176,75 @@ export class DshClient {
     return result;
   }
 
-  /** 应答服务端请求（审批/提问），rpcId 必须回显请求帧的信封 rpcId。 */
-  async respond<T>(rpcId: string, value: T): Promise<RpcReceipt> {
-    const message: ClientResponse = { type: "client-response", rpcId, result: { ok: true, value } };
-    const timeoutMs = this.opts.timeoutMs ?? 30000;
-    const text = await postJson(`${this.opts.baseUrl}/api/respond`, JSON.stringify(message), timeoutMs);
-    let receipt: RpcReceipt;
-    try {
-      receipt = JSON.parse(text) as RpcReceipt;
-    } catch {
-      return { accepted: false, reason: "bad-response" };
-    }
-    if (receipt.accepted === true) return receipt;
-    if (receipt.accepted === false) return receipt;
-    return { accepted: false, reason: "bad-response" };
+  /**
+   * 打开一个远程流端点（session/follow、session/control、$events 等），返回帧 AsyncIterable。
+   * 批 3 实现 remote.mux 物理层（WS 握手 + open/cancel/item/end/error 帧协议）；
+   * 本批只锁接口形状，调用即抛 StreamNotImplementedError。
+   */
+  openStream(_endpoint: string, _args: Record<string, unknown>): Promise<AsyncIterable<unknown>> {
+    throw new StreamNotImplementedError(_endpoint);
+  }
+
+  /**
+   * waterfall 应答（$events/result 一元 RPC）：clientId 来自 $events 流 ready 帧，eventId 来自 waterfall 帧。
+   * 成功值官方为 undefined（dispatchRpc 返回 {ok:true, value:void 0}），批 4 只关心 ok 与否。
+   */
+  answerEvent(clientId: string, eventId: string, outcome: RemoteEventOutcome): Promise<RpcResult<undefined>> {
+    const args: RemoteEventResultArgs = { clientId, eventId, outcome };
+    return this.call<undefined>("$events/result", args as unknown as Record<string, unknown>);
   }
 
   list(): Promise<RpcResult<SessionListResult>> {
-    return this.call<SessionListResult>("session.list", {});
+    return this.call<SessionListResult>("session/list", { _request: {} });
   }
 
   create(payload: SessionCreatePayload): Promise<RpcResult<SessionCreateResult>> {
-    return this.call<SessionCreateResult>("session.create", payload);
+    return this.call<SessionCreateResult>("session/create", { request: payload as unknown as Record<string, unknown> });
   }
 
-  prompt(payload: PromptPayload): Promise<RpcResult<PromptResult>> {
-    return this.call<PromptResult>("session.prompt", payload);
+  /** prompt：客户端自铸 requestId（UUID），必填；缺省时 mintId 补上。 */
+  prompt(payload: PromptRequestInput): Promise<RpcResult<PromptResult>> {
+    const request: PromptPayload = { ...payload, requestId: payload.requestId ?? mintId() };
+    return this.call<PromptResult>("session/prompt", { request: request as unknown as Record<string, unknown> });
   }
 
-  history(payload: HistoryPayload): Promise<RpcResult<HistoryResult>> {
-    return this.call<HistoryResult>("session.history", payload);
+  /** 分页历史（新契约）：address 为 {kind:"session", sessionId}，throughSeq 必填（-1 = 到尾）。 */
+  page(payload: SessionPageRequest): Promise<RpcResult<SessionPage>> {
+    return this.call<SessionPage>("session/page", { request: payload as unknown as Record<string, unknown> });
   }
 
   cancel(payload: CancelPayload): Promise<RpcResult<CancelResult>> {
-    return this.call<CancelResult>("session.cancel", payload);
+    return this.call<CancelResult>("session/cancel", { request: payload as unknown as Record<string, unknown> });
+  }
+
+  /* ---- 旧契约兼容层（@deprecated；批 3/4 接线时删除） ---- */
+
+  /**
+   * @deprecated 旧 /api/respond 回执模型（0.1.2-rc.1 已移除）。仅 approvalCenter.ts 过渡编译使用，
+   * 批 4 接线迁移到 answerEvent；本方法直接返回 bad-response。
+   */
+  async respond<T>(_rpcId: string, _value: T): Promise<RpcReceipt> {
+    return { accepted: false, reason: "bad-response" };
+  }
+
+  /**
+   * @deprecated 旧 session.history 端点（0.1.2-rc.1 已删除）。仅 sessionManager.ts 过渡编译使用，
+   * 批 4 接线迁移到 follow snapshot + page。
+   * 过渡实现：走 session/page（throughSeq:-1），只映射 {type:"event"} 记录；
+   * {type:"chunks"} 压缩行的解包是批 3 的工作，本过渡实现跳过（批 4 由解包层补齐）。
+   * 注意：真机 throughSeq:-1 返回空页（官方 paginate end=min(0,0)=0），批 4 必须改用 follow cursor。
+   */
+  async history(payload: HistoryPayload): Promise<RpcResult<HistoryResult>> {
+    const res = await this.page({
+      address: { kind: "session", sessionId: payload.sessionId },
+      throughSeq: -1,
+      beforeSeq: payload.beforeSeq,
+      maxMessages: payload.maxMessages,
+    });
+    if (!res.ok) return res;
+    const events = res.value.records
+      .filter((r): r is { type: "event"; event: SessionEvent } => r.type === "event")
+      .map((r) => ({ event: r.event }));
+    return { ok: true, value: { events, hasMore: res.value.hasMore } };
   }
 }

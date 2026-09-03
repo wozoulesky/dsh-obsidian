@@ -13,10 +13,14 @@ beforeAll(async () => {
     const chunks: Buffer[] = [];
     req.on("data", (c: Buffer) => chunks.push(c));
     req.on("end", () => {
-      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { rpcId: string; method: string; payload: Record<string, unknown> };
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+        rpcId: string;
+        method: string;
+        payload: { args: { request?: Record<string, unknown>; _request?: unknown } };
+      };
       const url = req.url ?? "";
       let value: unknown = {};
-      if (url === "/api/session.list") {
+      if (url === "/api/session/list") {
         value = {
           items: [
             { sessionId: "remote-1", updatedAt: 3, running: false, blank: false, cwd: "C:\\elsewhere" },
@@ -24,28 +28,39 @@ beforeAll(async () => {
             { sessionId: "vault-2", updatedAt: 1, running: false, blank: true, cwd: "C:\\vault" },
           ],
         };
-      } else if (url === "/api/session.create") {
+      } else if (url === "/api/session/create") {
         value = { sessionId: "new-1" };
-      } else if (url === "/api/session.history") {
-        const p = body.payload as { beforeSeq?: number };
+      } else if (url === "/api/session/page") {
+        // 批 2 过渡：DshClient.history() @deprecated shim 走 session/page（throughSeq:-1）。
+        // 旧契约的 projections 播种已不在 page 结果里（新契约投影在 follow snapshot）；
+        // 本 mock 改用 plan/mode + session/title 事件播种 title/plan，断言逻辑不变。
+        const p = body.payload.args.request as { beforeSeq?: number };
         if (p.beforeSeq === 9) {
           value = {
-            events: [{ event: { type: "user/message", seq: 4, time: 4, data: { id: "m0", role: "user", content: [{ type: "text", text: "更早的消息" }], source: { kind: "user" } } } }],
+            records: [
+              {
+                type: "event",
+                event: { type: "user/message", seq: 4, time: 4, data: { id: "m0", role: "user", content: [{ type: "text", text: "更早的消息" }], source: { kind: "user" } } },
+              },
+            ],
             hasMore: false,
           };
         } else {
           value = {
-            events: [
-              { event: { type: "session/title", seq: 9, time: 9, data: { title: "标题", source: "fallback" } } },
-              { event: { type: "user/message", seq: 10, time: 10, data: { id: "m1", role: "user", content: [{ type: "text", text: "hi" }], source: { kind: "user" } } } },
+            records: [
+              { type: "event", event: { type: "session/title", seq: 9, time: 9, data: { title: "标题", source: "fallback" } } },
+              { type: "event", event: { type: "plan/mode", seq: 10, time: 10, data: { active: true, pending: false } } },
+              {
+                type: "event",
+                event: { type: "user/message", seq: 11, time: 11, data: { id: "m1", role: "user", content: [{ type: "text", text: "hi" }], source: { kind: "user" } } },
+              },
             ],
             hasMore: true,
-            projections: { asOfSeq: 10, values: { title: "标题", plan: { active: true, pending: false } } },
           };
         }
-      } else if (url === "/api/session.prompt") {
+      } else if (url === "/api/session/prompt") {
         value = { accepted: true };
-      } else if (url === "/api/session.cancel") {
+      } else if (url === "/api/session/cancel") {
         value = { accepted: true };
       } else {
         res.writeHead(404);

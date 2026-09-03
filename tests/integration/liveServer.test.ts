@@ -1,15 +1,12 @@
 /**
  * 真实 DSH 服务器集成冒烟（可选）：仅在本地 dsh 服务可达时执行。
- * 覆盖单元测试无法验证的线上契约互操作：信封、session.list/history 结果形状、
- * /api/events.mux 真实 WebSocket 握手与帧流。服务不可达时整组 skip。
+ * 批 2（RPC 层）范围：探测改为新契约（cookie 认证 + 斜杠端点 + args 包装），
+ * 只保留 session/list 形状用例；WS 流（remote.mux）与 SessionManager 播种用例依赖
+ * 批 3/4 交付物，届时补回。服务不可达/凭据不可读时整组 skip。
  */
 import { beforeAll, describe, expect, it, type TestContext } from "vitest";
-import { DshClient, postJson, TransportFailure } from "../../src/transport/client";
-import { MuxStream, type MuxSink } from "../../src/transport/muxStream";
-import { SessionManager } from "../../src/core/sessionManager";
-import { SessionStore } from "../../src/core/store";
-import type { DshSettings } from "../../src/settings";
-import type { MuxFrame } from "../../src/transport/types";
+import { DshClient, TransportFailure } from "../../src/transport/client";
+import { DshCookieAuth, DshAuthError } from "../../src/transport/auth";
 
 const BASE = process.env.DSH_URL ?? "http://127.0.0.1:3080";
 
@@ -23,21 +20,26 @@ function skipIfDead(ctx: TestContext): void {
 
 beforeAll(async () => {
   try {
-    const text = await postJson(
-      `${BASE}/api/session.list`,
-      JSON.stringify({ type: "client-request", rpcId: "probe-1", method: "session.list", payload: {} }),
-      2000
-    );
-    alive = JSON.parse(text).result?.ok === true;
+    const auth = new DshCookieAuth({ baseUrl: BASE });
+    const cookie = await auth.cookieHeader();
+    client = new DshClient({ baseUrl: BASE, timeoutMs: 15000, cookieHeader: () => Promise.resolve(cookie) });
+    const res = await client.list();
+    alive = res.ok === true;
+    if (!alive && !res.ok) {
+      console.warn(`[live-server] 本地 DSH 探测失败（业务错误 ${res.error.code}），跳过集成冒烟`);
+    }
   } catch (err) {
     alive = false;
-    console.warn(`[live-server] 本地 DSH 不可达（${err instanceof TransportFailure ? "transport" : "other"}），跳过集成冒烟`);
+    if (err instanceof DshAuthError) {
+      console.warn(`[live-server] DSH 凭据不可读（${err.message}），跳过集成冒烟`);
+    } else {
+      console.warn(`[live-server] 本地 DSH 不可达（${err instanceof TransportFailure ? "transport" : "other"}），跳过集成冒烟`);
+    }
   }
-  client = new DshClient({ baseUrl: BASE, timeoutMs: 15000 });
 });
 
 describe("live DSH server", () => {
-  it("session.list 返回可用的会话数组（信封/结果形状契约）", async (ctx: TestContext) => {
+  it("session.list（新契约）返回可用的会话数组（信封/结果形状契约）", async (ctx: TestContext) => {
     skipIfDead(ctx);
     const res = await client.list();
     expect(res.ok).toBe(true);
@@ -45,78 +47,27 @@ describe("live DSH server", () => {
     expect(Array.isArray(res.value.items)).toBe(true);
     for (const s of res.value.items) {
       expect(typeof s.sessionId).toBe("string");
+      expect(typeof s.updatedAt).toBe("number");
+      expect(typeof s.running).toBe("boolean");
+      expect(typeof s.blank).toBe("boolean");
+      if (s.projections) {
+        expect(typeof s.projections.asOfSeq).toBe("number");
+        expect(typeof s.projections.values).toBe("object");
+      }
     }
   });
 
-  it("session.history 对首个会话可用（含 projections 容错）", async (ctx: TestContext) => {
+  it("session/page 对 throughSeq:-1 返回合法空页形状（records 数组 + hasMore 布尔）", async (ctx: TestContext) => {
     skipIfDead(ctx);
     const list = await client.list();
     if (!list.ok || list.value.items.length === 0) return;
-    const sid = list.value.items[0].sessionId;
-    const res = await client.history({ sessionId: sid, maxMessages: 3 });
+    // 只对普通会话探测（subagent 会话的 page 需要 parent 地址形态）
+    const regular = list.value.items.find((s) => s.origin !== "subagent");
+    if (!regular) return;
+    const res = await client.page({ address: { kind: "session", sessionId: regular.sessionId }, throughSeq: -1, maxMessages: 3 });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
-    expect(Array.isArray(res.value.events)).toBe(true);
+    expect(Array.isArray(res.value.records)).toBe(true);
     expect(typeof res.value.hasMore).toBe("boolean");
   });
-
-  it("events.mux WebSocket 完成握手并收到至少一帧", async (ctx: TestContext) => {
-    skipIfDead(ctx);
-    const frames: { rpcId: string; frame: MuxFrame }[] = [];
-    const states: string[] = [];
-    const sink: MuxSink = {
-      onFrame: (rpcId, frame) => frames.push({ rpcId, frame }),
-      onState: (s) => states.push(s),
-    };
-    const stream = new MuxStream(BASE, sink, { backoffBaseMs: 300, backoffMaxMs: 2000 });
-    stream.start();
-    try {
-      await viWaitFor(() => states.includes("connected"), 8000);
-      await viWaitFor(() => frames.length >= 1, 8000);
-      expect(frames.length).toBeGreaterThanOrEqual(1);
-    } finally {
-      stream.stop();
-    }
-  });
-
-  it("SessionManager.openSession 用真实历史播种视图（折叠真实事件形状）", async (ctx: TestContext) => {
-    skipIfDead(ctx);
-    const store = new SessionStore();
-    const manager = new SessionManager({
-      client: new DshClient({ baseUrl: BASE, timeoutMs: 15000 }),
-      store,
-      vaultPath: process.cwd(),
-      settings: { values: { historyPageSize: 50 } } as unknown as DshSettings,
-      t: (key) => key,
-    });
-    await manager.refresh();
-    expect(manager.sessions.length).toBeGreaterThan(0);
-    const sid = manager.sessions[0].sessionId;
-    await manager.openSession(sid);
-    expect(manager.currentId).toBe(sid);
-    const view = store.getView(sid);
-    expect(view).toBeDefined();
-    if (!view) return;
-    expect(view.lastSeq).toBeGreaterThanOrEqual(0);
-    // 若尾页含 turn/start，lastTurnStartSeq 必须被真实记录（inline edit 状态机依赖它）
-    if (view.nodes.length > 0) {
-      expect(view.firstSeq).toBeGreaterThanOrEqual(0);
-    }
-    expect(view.lastTurnStartSeq >= -1).toBe(true);
-  });
 });
-
-function viWaitFor(pred: () => boolean, timeoutMs: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const t0 = Date.now();
-    const timer = setInterval(() => {
-      if (pred()) {
-        clearInterval(timer);
-        resolve();
-      } else if (Date.now() - t0 > timeoutMs) {
-        clearInterval(timer);
-        reject(new Error("等待超时"));
-      }
-    }, 100);
-  });
-}
