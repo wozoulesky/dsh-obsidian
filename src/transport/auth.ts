@@ -5,12 +5,14 @@
  * - cookie 名：`dsh-auth-` + base64url(sha256(authority))（authority 必须与请求 Host header 严格一致）
  * - cookie 值：`v1.<body>.<sig>`，body = base64url(utf8(JSON.stringify({version,authority,issuedAt,expiresAt})))，
  *   sig = base64url(hmac-sha256(secret, utf8(body))) —— HMAC 的输入是 base64url 编码后的 body 字符串本身。
- * - secret：`%USERPROFILE%/.dsh/.credentials.yaml` → `records["client-connection/browser-session"].payload.secret`
- *   （32 字节 base64url 字符串，签名前 decode 成 Buffer）。
+ * - secret：`<用户主目录>/.dsh/.credentials.yaml`（经 `os.homedir()` 获取主目录）→
+ *   `records["client-connection/browser-session"].payload.secret`（32 字节 base64url 字符串，签名前 decode 成 Buffer）。
  *
  * 运行环境：本文件在 Obsidian 渲染进程（nodeIntegration=false，Obsidian 提供 require shim）与
  * Node 单测环境同时运行。沿用 nodeShims.ts 的模式：`declare function require(...)` + `require("crypto")` /
- * `require("fs")`，esbuild 已把 Node builtins 全部 external。YAML 为简易逐行解析，无第三方依赖。
+ * `require("fs")` / `require("os")`，esbuild 已把 Node builtins 全部 external。
+ * 注意：渲染进程没有 `process` 全局，本文件不得出现裸 `process` 引用（主目录走 os.homedir()，
+ * 它在 Windows 上走 GetHomeDirectoryW，不依赖 process.env）。YAML 为简易逐行解析，无第三方依赖。
  *
  * cookie 不落盘、不持久化（每进程内存签名）；credentials 文件变化（mtime）或此前读取失败时自动重读，
  * 覆盖「DSH 重启换 secret」场景。
@@ -40,11 +42,18 @@ interface FsLike {
   stat(path: string, cb: (err: unknown, stats?: StatsLike) => void): void;
 }
 
+interface OsLike {
+  homedir(): string;
+}
+
 function loadCrypto(): CryptoLike {
   return require("crypto") as CryptoLike;
 }
 function loadFs(): FsLike {
   return require("fs") as FsLike;
+}
+function loadOs(): OsLike {
+  return require("os") as OsLike;
 }
 
 /** DSH 凭据读取 / cookie 签名失败（供上层 UI 提示「DSH 凭据不可读」）。 */
@@ -111,16 +120,29 @@ export function signCookie(payload: CookiePayload, secretKey: Buffer): string {
   return `v1.${body}.${sig}`;
 }
 
-/** cookie 有效时长：7 天（≤ 服务端 cookieMaxAgeDays 默认 30 的上限，留足余量）。 */
-export const COOKIE_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * cookie 有效时长：12 小时。
+ *
+ * 结构性安全值：服务端对每个 cookie 校验 `expiresAt - issuedAt <= cookieMaxAgeDays`，
+ * 而 `cookieMaxAgeDays` 是部署方可配置的（官方 schema `z.natural().min(1).default(30)`），
+ * 插件无法感知该配置。取严格小于任何合法配置最小值（1 天）的 12 小时，保证任何合法
+ * 部署下签名都不会被 maxAge 校验拒绝（结构性 401）。
+ * cookie 每次请求重签、不落盘，短寿命无代价。
+ */
+export const COOKIE_LIFETIME_MS = 12 * 60 * 60 * 1000;
 
 export interface DshCookieAuthOptions {
   /** DSH web 根地址（如 http://127.0.0.1:3080）。authority 取其 host:port。 */
   baseUrl: string;
-  /** 读取 credentials YAML 文本；默认读真实 %USERPROFILE%/.dsh/.credentials.yaml。单测注入假文本。 */
+  /** 读取 credentials YAML 文本；默认读真实 `<主目录>/.dsh/.credentials.yaml`。单测注入假文本。 */
   readCredentialsFile?: () => Promise<string>;
   /** 当前时间（毫秒）；默认 Date.now。单测注入固定时间以对齐签名向量。 */
   nowMs?: () => number;
+  /**
+   * 用户主目录（默认 os.homedir()；渲染进程无 process 全局，不得回退到 process.env）。
+   * 单测注入临时目录以测试真实文件路径分支。
+   */
+  homedir?: () => string;
 }
 
 const CREDENTIALS_RECORD_KEY = "client-connection/browser-session";
@@ -164,10 +186,25 @@ export function extractSecretFromYaml(yamlText: string, recordKey: string = CRED
   return key;
 }
 
-/** 默认凭据文件路径：`%USERPROFILE%/.dsh/.credentials.yaml`（Electron 渲染进程可读的环境变量）。 */
-export function defaultCredentialsPath(): string {
-  const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
-  return `${home}/.dsh/.credentials.yaml`;
+/**
+ * 默认凭据文件路径：`<用户主目录>/.dsh/.credentials.yaml`。
+ *
+ * 渲染进程没有 `process` 全局（nodeIntegration=false），主目录一律经 `os.homedir()` 获取
+ * （Windows 上走 GetHomeDirectoryW，不依赖 process.env）。homedir 为空/异常时抛 DshAuthError，
+ * 保证 `new DshCookieAuth({baseUrl})` 同步路径不裸抛 ReferenceError/TypeError。
+ * 单测可注入 homedir 函数；缺省使用 require("os") 与仓库既有 builtin 加载模式一致。
+ */
+export function defaultCredentialsPath(homedir?: () => string): string {
+  let home: string;
+  try {
+    home = (homedir ?? loadOs().homedir)();
+  } catch (err) {
+    throw new DshAuthError("无法获取用户主目录（DSH 凭据位置未知）", err);
+  }
+  if (!home) {
+    throw new DshAuthError("无法获取用户主目录（DSH 凭据位置未知）");
+  }
+  return `${home.replace(/[\\/]+$/u, "")}/.dsh/.credentials.yaml`;
 }
 
 /**
@@ -198,7 +235,7 @@ export class DshCookieAuth {
       this.readFile = opts.readCredentialsFile;
       this.readMtime = () => Promise.resolve(0);
     } else {
-      const path = defaultCredentialsPath();
+      const path = defaultCredentialsPath(opts.homedir);
       this.readFile = () =>
         new Promise<string>((resolve, reject) => {
           fs.readFile(path, "utf8", (err, data) => {

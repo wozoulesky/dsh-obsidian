@@ -5,13 +5,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   authorityOf,
   COOKIE_LIFETIME_MS,
   cookieName,
   decodeBase64Url,
+  defaultCredentialsPath,
   DshAuthError,
   DshCookieAuth,
   encodeBase64Url,
@@ -71,14 +72,14 @@ function credsYaml(secretB64url: string): string {
 }
 
 describe("签名向量（官方 encodeCookie 算法对拍）", () => {
-  it("golden 向量与官方算法完全一致（固定 secret/authority/时间戳）", () => {
+  it("golden 向量与官方算法完全一致（固定 secret/authority/时间戳，expiresAt=issuedAt+12h）", () => {
     const secret = Buffer.from("0123456789abcdef0123456789abcdef");
     const authority = "127.0.0.1:3080";
-    const payload = { version: 1 as const, authority, issuedAt: 1700000000000, expiresAt: 1700604800000 };
+    const payload = { version: 1 as const, authority, issuedAt: 1700000000000, expiresAt: 1700043200000 };
     // 向量由 tmp/golden-vector.mjs（node:crypto 独立实现）生成
     expect(cookieName(authority)).toBe("dsh-auth-VPhEEcLKeqRDBoBalzN2Nm7CnfxKhLE00pKIDWxt1sw");
     expect(signCookie(payload, secret)).toBe(
-      "v1.eyJ2ZXJzaW9uIjoxLCJhdXRob3JpdHkiOiIxMjcuMC4wLjE6MzA4MCIsImlzc3VlZEF0IjoxNzAwMDAwMDAwMDAwLCJleHBpcmVzQXQiOjE3MDA2MDQ4MDAwMDB9.mWxtyGe5w8-xorc9rlePRhjEIFsUbIWKZWoT8TMP7iU"
+      "v1.eyJ2ZXJzaW9uIjoxLCJhdXRob3JpdHkiOiIxMjcuMC4wLjE6MzA4MCIsImlzc3VlZEF0IjoxNzAwMDAwMDAwMDAwLCJleHBpcmVzQXQiOjE3MDAwNDMyMDAwMDB9._6d1f4VDD6a6489SoqE0R2BqxdGTnd4TOqj_jHUvTBc"
     );
   });
 
@@ -144,8 +145,26 @@ describe("YAML 凭据解析", () => {
   });
 });
 
+describe("defaultCredentialsPath（os.homedir 实现）", () => {
+  it("拼接 <homedir>/.dsh/.credentials.yaml；尾斜杠归一", () => {
+    expect(defaultCredentialsPath(() => "C:\\Users\\tester")).toBe("C:\\Users\\tester/.dsh/.credentials.yaml");
+    expect(defaultCredentialsPath(() => "/home/tester")).toBe("/home/tester/.dsh/.credentials.yaml");
+    expect(defaultCredentialsPath(() => "C:\\Users\\tester\\")).toBe("C:\\Users\\tester/.dsh/.credentials.yaml");
+    expect(defaultCredentialsPath(() => "/home/tester/")).toBe("/home/tester/.dsh/.credentials.yaml");
+  });
+
+  it("homedir 为空 / 抛异常 → 抛 DshAuthError（渲染进程无 process 全局，不得裸抛）", () => {
+    expect(() => defaultCredentialsPath(() => "")).toThrow(DshAuthError);
+    expect(() => defaultCredentialsPath(() => { throw new Error("homedir 不可用"); })).toThrow(DshAuthError);
+  });
+
+  it("缺省走 require(\"os\").homedir()，等于 node:os.homedir()", () => {
+    expect(defaultCredentialsPath()).toBe(`${homedir()}/.dsh/.credentials.yaml`);
+  });
+});
+
 describe("DshCookieAuth（注入读取函数）", () => {
-  it("cookieHeader 返回完整 Cookie 头值：名称按 authority 哈希、时间窗 = now..now+7d", async () => {
+  it("cookieHeader 返回完整 Cookie 头值：名称按 authority 哈希、时间窗 = now..now+12h", async () => {
     const now = 1700000000000;
     const auth = new DshCookieAuth({
       baseUrl: "http://127.0.0.1:3080",
@@ -158,7 +177,7 @@ describe("DshCookieAuth（注入读取函数）", () => {
     expect(payload.authority).toBe(AUTHORITY);
     expect(payload.issuedAt).toBe(now);
     expect(payload.expiresAt - payload.issuedAt).toBe(COOKIE_LIFETIME_MS);
-    expect(COOKIE_LIFETIME_MS).toBe(7 * 24 * 60 * 60 * 1000);
+    expect(COOKIE_LIFETIME_MS).toBe(12 * 60 * 60 * 1000);
     expectSignedWith(header, SECRET_A);
   });
 
@@ -220,29 +239,24 @@ describe("DshCookieAuth（注入读取函数）", () => {
   });
 });
 
-describe("DshCookieAuth（真实文件路径：%USERPROFILE%/.dsh/.credentials.yaml）", () => {
+describe("DshCookieAuth（真实文件路径：<homedir>/.dsh/.credentials.yaml，注入 homedir）", () => {
   let dir: string;
-  let origUserProfile: string | undefined;
   let credsPath: string;
 
   beforeEach(() => {
-    origUserProfile = process.env.USERPROFILE;
     dir = mkdtempSync(join(tmpdir(), "dsh-auth-test-"));
-    process.env.USERPROFILE = dir;
     mkdirSync(join(dir, ".dsh"), { recursive: true });
     credsPath = join(dir, ".dsh", ".credentials.yaml");
   });
 
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
-    if (origUserProfile === undefined) delete process.env.USERPROFILE;
-    else process.env.USERPROFILE = origUserProfile;
   });
 
   it("读真实凭据路径并自签；文件 mtime 变化后自动用新 secret 重签（DSH 重启换 secret）", async () => {
     const secretB = randomBytes(32);
     writeFileSync(credsPath, credsYaml(encodeBase64Url(SECRET_A)));
-    const auth = new DshCookieAuth({ baseUrl: "http://127.0.0.1:3080" });
+    const auth = new DshCookieAuth({ baseUrl: "http://127.0.0.1:3080", homedir: () => dir });
     const h1 = await auth.cookieHeader();
     expectSignedWith(h1, SECRET_A);
 
@@ -257,7 +271,7 @@ describe("DshCookieAuth（真实文件路径：%USERPROFILE%/.dsh/.credentials.y
   });
 
   it("凭据文件缺失 → 抛含路径的明确错误；文件重建后自动恢复", async () => {
-    const auth = new DshCookieAuth({ baseUrl: "http://127.0.0.1:3080" });
+    const auth = new DshCookieAuth({ baseUrl: "http://127.0.0.1:3080", homedir: () => dir });
     await expect(auth.cookieHeader()).rejects.toThrow(/无法读取 DSH 凭据文件/);
     writeFileSync(credsPath, credsYaml(encodeBase64Url(SECRET_A)));
     const header = await auth.cookieHeader();

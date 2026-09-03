@@ -2,7 +2,8 @@
  * 批 1 认证层真机实测探针（Node 直接跑：node tmp/probe-auth.mjs）。
  *
  * 验证内容：
- * 1. 读真实 %USERPROFILE%/.dsh/.credentials.yaml，用与 src/transport/auth.ts 相同的算法签 cookie
+ * 1. 读真实 <主目录>/.dsh/.credentials.yaml（os.homedir()，与 src/transport/auth.ts 相同），
+ *    用与 src/transport/auth.ts 相同的算法签 cookie
  *    （算法在此独立实现，与 src/transport/auth.ts 同源：v1.<b64url(json)>.<b64url(hmac)>）。
  * 2. POST http://127.0.0.1:3080/api/session/list 带 Cookie → 期望 200 且响应含 "items"。
  * 3. WS ws://127.0.0.1:3080/api/remote.mux 握手带 Cookie → 期望 open（101）；
@@ -13,6 +14,7 @@ import { createHash, createHmac } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import http from "node:http";
 import { createRequire } from "node:module";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -22,7 +24,7 @@ const require = createRequire(import.meta.url);
 const { WebSocket } = require("ws");
 
 const BASE_URL = process.env.DSH_URL ?? "http://127.0.0.1:3080";
-const CREDENTIALS_PATH = join(process.env.USERPROFILE ?? "", ".dsh", ".credentials.yaml");
+const CREDENTIALS_PATH = join(homedir(), ".dsh", ".credentials.yaml");
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ---- 与 src/transport/auth.ts 相同的算法 ----
@@ -71,7 +73,7 @@ const yamlText = await readFile(CREDENTIALS_PATH, "utf8");
 const secret = extractSecretFromYaml(yamlText);
 const issuedAt = Date.now();
 const cookieValue = signCookie(
-  { version: 1, authority, issuedAt, expiresAt: issuedAt + 7 * 24 * 60 * 60 * 1000 },
+  { version: 1, authority, issuedAt, expiresAt: issuedAt + 12 * 60 * 60 * 1000 },
   secret
 );
 const cookieHeader = `${cookieName(authority)}=${cookieValue}`;
