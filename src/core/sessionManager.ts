@@ -66,6 +66,8 @@ export class SessionManager {
   }
 
   /** 会话是否存在（用 1 条历史探测）。 */
+  // 批4 TODO：新契约错误码为 "session/not-found"（斜杠），此处的旧码比对失效（exists 恒 true）；
+  // 且 history() shim 在真机恒空页——批 4 必须改为 follow 探测并改判新错误码。
   async exists(sessionId: string): Promise<boolean> {
     const res = await this.client.history({ sessionId, maxMessages: 1 });
     if (res.ok) return true;
