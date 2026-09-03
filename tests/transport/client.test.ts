@@ -9,12 +9,13 @@
  * - 错误结果透传（gateway/arguments-invalid、session/not-found 等业务错误码）
  * - 硬超时 / 中途断开（TransportFailure）
  * - answerEvent 三态编码（next/result/rejected）
- * - openStream 批 3 占位（StreamNotImplementedError）
+ * - openStream（批 3）：注入假物理层断言端点/args 透传与帧迭代
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createServer, type IncomingMessage, type Server } from "http";
-import { DshClient, postJson, StreamNotImplementedError, TransportFailure } from "../../src/transport/client";
+import { DshClient, postJson, TransportFailure } from "../../src/transport/client";
 import { DshAuthError, DshCookieAuth } from "../../src/transport/auth";
+import { RemoteMuxTransport } from "../../src/transport/muxStream";
 
 let server: Server;
 let baseUrl: string;
@@ -322,11 +323,60 @@ describe("DshClient 新契约（端点斜杠 + args 包装 + Cookie）", () => {
     });
   });
 
-  it("openStream 是批 3 占位：调用即抛 StreamNotImplementedError", async () => {
+  it("openStream 委托注入的物理层：端点/args 透传 + 帧迭代（批 3）", async () => {
+    const calls: Array<{ endpoint: string; args: Record<string, unknown> }> = [];
+    const fake = {
+      open<T>(endpoint: string, args: Record<string, unknown>): AsyncIterable<T> {
+        calls.push({ endpoint, args });
+        return (async function* () {
+          yield { type: "snapshot" } as T;
+          yield { type: "event" } as T;
+        })();
+      },
+      start: () => {},
+      stop: () => {},
+      get state() {
+        return null;
+      },
+    } as unknown as RemoteMuxTransport;
+    const client = new DshClient({ baseUrl, cookieHeader: () => Promise.resolve(FIXED_COOKIE), streamTransport: fake });
+    const stream = await client.openStream<{ type: string }>("session/follow", {
+      request: { address: { kind: "session", sessionId: "s1" }, maxMessages: 10 },
+    });
+    const frames: Array<{ type: string }> = [];
+    for await (const frame of stream) frames.push(frame);
+    expect(calls).toEqual([
+      { endpoint: "session/follow", args: { request: { address: { kind: "session", sessionId: "s1" }, maxMessages: 10 } } },
+    ]);
+    expect(frames).toEqual([{ type: "snapshot" }, { type: "event" }]);
+  });
+
+  it("openStream $events 端点 args 恒为空对象（网关精确要求 args:{}）", async () => {
+    const calls: Array<{ endpoint: string; args: Record<string, unknown> }> = [];
+    const fake = {
+      open<T>(endpoint: string, args: Record<string, unknown>): AsyncIterable<T> {
+        calls.push({ endpoint, args });
+        return (async function* () {
+          yield { type: "ready", clientId: "cid-1" } as T;
+        })();
+      },
+      start: () => {},
+      stop: () => {},
+      get state() {
+        return null;
+      },
+    } as unknown as RemoteMuxTransport;
+    const client = new DshClient({ baseUrl, cookieHeader: () => Promise.resolve(FIXED_COOKIE), streamTransport: fake });
+    const stream = await client.openStream<{ type: string; clientId?: string }>("$events", {});
+    const frames: Array<{ type: string; clientId?: string }> = [];
+    for await (const frame of stream) frames.push(frame);
+    expect(calls).toEqual([{ endpoint: "$events", args: {} }]);
+    expect(frames[0]).toEqual({ type: "ready", clientId: "cid-1" });
+  });
+
+  it("默认物理层（未注入）时 client.mux 可用且 muxUrl 指向 ws://.../api/remote.mux", () => {
     const client = makeClient();
-    expect(() => client.openStream("session/follow", { request: {} })).toThrow(StreamNotImplementedError);
-    // 显式 await 抛错（同步 throw 在 async 语义下仍为 rejected promise 的等价形式）
-    await expect(Promise.resolve().then(() => client.openStream("$events", {}))).rejects.toBeInstanceOf(StreamNotImplementedError);
+    expect(client.mux.muxUrl()).toBe(`${baseUrl.replace(/^http/u, "ws")}/api/remote.mux`);
   });
 });
 

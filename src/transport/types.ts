@@ -171,6 +171,8 @@ export interface SessionEvent {
   data: Record<string, unknown>;
   ignorable?: true;
   sourceEventSeqs?: number[];
+  /** 线上事件表面的折叠替换标记（官方 SessionEvent wire 契约，批 3 核实补上）；批 4 折叠器决定是否消费。 */
+  surfaceOp?: "append" | { op: "replace"; start: number; end: number };
 }
 
 export type ContentBlock =
@@ -263,9 +265,15 @@ export interface RemoteEventEmitFrame {
   args: unknown[];
 }
 
-/** waterfall 取消帧。 */
+/** waterfall 取消帧（官方以 eventId 关联：同一事件被其他监听者认领/取消后广播）。 */
 export interface RemoteEventCancellationFrame {
   type: "cancel";
+  eventId: string;
+}
+
+/** 官方 $events 流首个 item 携带的 watermark 帧（应答/流代数关联用；批 4 需要时消费）。 */
+export interface RemoteEventWatermarkFrame {
+  type: "watermark";
   eventId: string;
 }
 
@@ -273,7 +281,8 @@ export type RemoteEventDownlinkFrame =
   | RemoteEventReadyFrame
   | RemoteEventEmitFrame
   | RemoteEventWaterfallFrame
-  | RemoteEventCancellationFrame;
+  | RemoteEventCancellationFrame
+  | RemoteEventWatermarkFrame;
 
 /**
  * waterfall 应答 outcome 三态：
@@ -294,6 +303,12 @@ export interface RemoteEventResultArgs {
 }
 
 /* ---- remote.mux 流帧（批 3 直接用，本批只定义类型） ---- */
+
+/** 客户端 → 服务端：打开一个逻辑流。payload 为该端点线上请求（session/* 为 {args:{request}}；$events 为 {args:{}}）。 */
+export type RemoteStreamOpen = { type: "open"; streamId: string; endpoint: string; payload: unknown };
+/** 客户端 → 服务端：取消/关闭一个逻辑流。 */
+export type RemoteStreamCancel = { type: "cancel"; streamId: string };
+export type RemoteStreamClientMessage = RemoteStreamOpen | RemoteStreamCancel;
 
 /** 服务端逻辑流帧：item 携带一个流值（首帧/事件帧）；end 流结束；error 流错误。 */
 export type RemoteStreamItem = { type: "item"; streamId: string; value?: unknown };
@@ -383,9 +398,20 @@ export interface HistoryEntry {
   view?: unknown;
 }
 
-/* ---- mux 帧（旧契约形状；批 3 会重写 MuxFrame 联合类型，本批不动它） ---- */
+/* ---- mux 帧（批 3 新形态：remote.mux 物理层转发 + 逻辑帧类型，批 4 消费） ---- */
 
-export type MuxFrame =
+/** 物理层透传信封：remote.mux 解出 {item,end,error} 后按流分发；批 4 只关心 frame，streamId 已在上游按流拆开。 */
+export interface MuxEnvelope {
+  streamId: string;
+  frame: RemoteStreamServerMessage;
+}
+
+/**
+ * @deprecated 旧 MuxFrame 联合（0.1.1 的 session/event、approval/requested 等）。
+ * 仅 store.applyMux / approvalCenter.ingest / chatView（批 4 接线对象）过渡编译使用；
+ * 批 4 迁移到新 MuxFrame（SessionFollowFrame/SessionControlFrame/RemoteEventDownlinkFrame）后删除。
+ */
+export type LegacyMuxFrame =
   | { type: "session/event"; sessionId: string; event: SessionEvent; view?: unknown }
   | { type: "session/subscribed"; sessionId: string; lastSeq: number }
   | { type: "session/queue"; sessionId: string; items: QueuedInboxItem[] }
@@ -396,3 +422,12 @@ export type MuxFrame =
   | { type: "question/requested"; sessionId: string; questions: AskUserQuestionItem[] }
   | { type: "question/resolved"; sessionId: string; questionRpcId: string; outcome: "answered" | "cancelled" }
   | { type: "stream/error"; error: RpcError };
+
+/**
+ * 批 3 事件流帧联合：物理层按流分发后、上层（store/approvalCenter，批 4）可见的逻辑帧。
+ * - SessionFollowFrame：session/follow 流（snapshot + event）
+ * - SessionControlFrame：session/control 流（baseline + queue/jobs/projection）
+ * - RemoteEventDownlinkFrame：$events 流（ready/emit/waterfall/cancel/watermark）
+ * - LegacyMuxFrame：0.1.1 旧帧变体（@deprecated 兼容 alias，批 4 接线时从联合中移除）
+ */
+export type MuxFrame = SessionFollowFrame | SessionControlFrame | RemoteEventDownlinkFrame | LegacyMuxFrame;

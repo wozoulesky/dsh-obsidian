@@ -1,5 +1,5 @@
 /**
- * DSH 0.1.2-rc.1 客户端（批 2：RPC 层）。
+ * DSH 0.1.2-rc.1 客户端（批 2：RPC 层；批 3：openStream 事件流接线）。
  *
  * 契约事实（对照本机 0.1.2-rc.1 官方源码 + 真机实测核实）：
  * - 一元 RPC：POST /api/<namespace>/<method>（斜杠端点）；信封
@@ -7,8 +7,8 @@
  *   多余/缺失键被 gateway/arguments-invalid 拒绝。
  * - 认证：请求携带 browser-session 自签 cookie（DshCookieAuth，批 1）。认证失败（DshAuthError）明确传播。
  * - $events/result：waterfall 应答一元 RPC，args {clientId, eventId, outcome}（三态）。
- * - 事件流（batch 3 实现）：openStream(endpoint, args) 走 WS remote.mux 打开流端点，
- *   本批只定义接口形状，实现为明确 TODO 占位。
+ * - 事件流（批 3）：openStream(endpoint, args, signal?) 走 WS remote.mux 打开流端点
+ *   （物理层 RemoteMuxTransport，muxStream.ts），返回帧 AsyncIterable。
  */
 import * as http from "http";
 import * as https from "https";
@@ -35,20 +35,13 @@ import {
   type RpcReceipt,
 } from "./types";
 import { DshAuthError, type DshCookieAuth } from "./auth";
+import { RemoteMuxTransport, type RemoteMuxTransportOptions } from "./muxStream";
 import { clearTimer, setTimer } from "../utils/timers";
 
 export class TransportFailure extends Error {
   constructor(message: string, readonly cause?: unknown) {
     super(message);
     this.name = "TransportFailure";
-  }
-}
-
-/** openStream 在批 3 才实现（mux 帧协议）；本批调用即抛此错误，避免与批 3 抢文件。 */
-export class StreamNotImplementedError extends Error {
-  constructor(readonly endpoint: string) {
-    super(`openStream(${endpoint}) 未实现：remote.mux 帧协议在批 3 交付`);
-    this.name = "StreamNotImplementedError";
   }
 }
 
@@ -123,10 +116,36 @@ export interface DshClientOptions {
   auth?: DshCookieAuth;
   /** 测试注入：cookieHeader 函数（返回完整 Cookie 头值，不含 Cookie: 前缀）。 */
   cookieHeader?: () => Promise<string>;
+  /**
+   * 测试注入：流物理层（缺省内部构造 RemoteMuxTransport）。
+   * 传入时忽略 transport 选项；auth/cookieHeader 若注入则透传给默认物理层。
+   */
+  streamTransport?: RemoteMuxTransport;
+  /** 默认流物理层选项（backoff 参数 / onState 状态回调；批 4 main.ts 接状态栏）。 */
+  transportOptions?: RemoteMuxTransportOptions;
 }
 
 export class DshClient {
-  constructor(private opts: DshClientOptions) {}
+  private readonly stream: RemoteMuxTransport | undefined;
+
+  constructor(private opts: DshClientOptions) {
+    if (!opts.streamTransport) {
+      this.stream = new RemoteMuxTransport(opts.baseUrl, {
+        auth: opts.auth,
+        cookieHeader: opts.cookieHeader,
+        onState: opts.transportOptions?.onState,
+        backoffBaseMs: opts.transportOptions?.backoffBaseMs,
+        backoffMaxMs: opts.transportOptions?.backoffMaxMs,
+      });
+    } else {
+      this.stream = opts.streamTransport;
+    }
+  }
+
+  /** 流物理层实例（批 4 main.ts 用 start()/stop()/state 接管生命周期）。 */
+  get mux(): RemoteMuxTransport {
+    return this.stream as RemoteMuxTransport;
+  }
 
   private async authHeader(): Promise<PostJsonHeaders> {
     if (this.opts.cookieHeader) return { cookie: await this.opts.cookieHeader() };
@@ -178,11 +197,15 @@ export class DshClient {
 
   /**
    * 打开一个远程流端点（session/follow、session/control、$events 等），返回帧 AsyncIterable。
-   * 批 3 实现 remote.mux 物理层（WS 握手 + open/cancel/item/end/error 帧协议）；
-   * 本批只锁接口形状，调用即抛 StreamNotImplementedError。
+   * 批 3 实现：remote.mux 物理层（WS 握手 + open/cancel/item/end/error 帧协议）。
+   * - session/follow：args {request:{address, maxMessages?}} → SessionFollowFrame 帧
+   * - session/control：args {} → SessionControlFrame 帧
+   * - $events：args {} → RemoteEventDownlinkFrame 帧（首帧 {type:"ready"} 的 clientId 必须留存用于 answerEvent）
+   * 参数透传语义：除 $events（恒空 args）外一律包 {request: args} 与线上描述符一致；
+   * signal abort 会发 cancel 帧并终止迭代。
    */
-  openStream(_endpoint: string, _args: Record<string, unknown>): Promise<AsyncIterable<unknown>> {
-    throw new StreamNotImplementedError(_endpoint);
+  openStream<T = unknown>(endpoint: string, args: Record<string, unknown> = {}, signal?: AbortSignal): Promise<AsyncIterable<T>> {
+    return Promise.resolve(this.mux.open<T>(endpoint, args, signal));
   }
 
   /**
