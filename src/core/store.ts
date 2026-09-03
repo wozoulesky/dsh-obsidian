@@ -1,5 +1,5 @@
 import { createSessionView, foldEvent, type SessionView } from "./eventFold";
-import type { HistoryEntry, MuxFrame, ProjectionsBlock, SessionControlFrame, SessionFollowFrame } from "../transport/types";
+import type { ProjectionsBlock, SessionControlFrame, SessionEvent, SessionFollowFrame } from "../transport/types";
 import { expandHistoryRecords } from "../transport/chunkRows";
 
 interface ProjectionCell {
@@ -7,7 +7,7 @@ interface ProjectionCell {
   seq: number;
 }
 
-/** 全会话视图模型仓库：mux 帧与历史页的统一入口，higher-seq-wins 投影语义。 */
+/** 全会话视图模型仓库：follow/control 帧与历史页的统一入口，higher-seq-wins 投影语义。 */
 export class SessionStore {
   private views = new Map<string, SessionView>();
   private projections = new Map<string, Map<string, ProjectionCell>>();
@@ -64,51 +64,6 @@ export class SessionStore {
       return true;
     }
     return false;
-  }
-
-  /** 处理一帧 mux 推送；事件/队列/基线仅作用于已存在的视图（避免为所有已挂载会话物化视图），投影则允许播种（含未打开会话的标题/计划）。 */
-  // 批4 TODO：applyMux 是旧 events.mux 帧消费（0.1.2-rc.1 已无上游），
-  // 由 applyFollowSnapshot/applyFollowEvent/applyControlFrame 取代；批 4b 接线 main.ts 后删除本方法与 LegacyMuxFrame 依赖。
-  applyMux(_rpcId: string, frame: MuxFrame): void {
-    switch (frame.type) {
-      case "session/event": {
-        const view = this.views.get(frame.sessionId);
-        if (!view) return;
-        foldEvent(view, frame.event);
-        this.notify();
-        break;
-      }
-      case "session/subscribed": {
-        const view = this.views.get(frame.sessionId);
-        if (!view) return;
-        let changed = false;
-        if (frame.lastSeq > view.lastSeq) {
-          view.lastSeq = frame.lastSeq;
-          changed = true;
-        }
-        if (view.running) {
-          view.running = false; // 流重开基线：丢弃陈旧的在飞回合状态，避免永久 ⏳
-          changed = true;
-        }
-        if (changed) this.notify();
-        break;
-      }
-      case "session/projection": {
-        if (this.applyProjection(frame.sessionId, frame.key, frame.value, frame.seq)) {
-          this.notify();
-        }
-        break;
-      }
-      case "session/queue": {
-        const view = this.views.get(frame.sessionId);
-        if (!view) return;
-        view.queueItems = frame.items;
-        this.notify();
-        break;
-      }
-      default:
-        break; // 审批/提问/jobs/stream-error 由 ApprovalCenter 等处理，store 忽略
-    }
   }
 
   /**
@@ -178,10 +133,10 @@ export class SessionStore {
     return changed;
   }
 
-  /** 用历史页播种视图（调用方负责保证 seq 递增顺序）。 */
-  seedHistory(sessionId: string, entries: HistoryEntry[]): void {
+  /** 用已展开的历史事件播种视图（调用方负责保证 seq 递增顺序）。 */
+  seedHistory(sessionId: string, events: SessionEvent[]): void {
     const view = this.ensureView(sessionId);
-    for (const entry of entries) foldEvent(view, entry.event);
+    for (const event of events) foldEvent(view, event);
     this.notify();
   }
 
@@ -190,10 +145,10 @@ export class SessionStore {
    * 保证 lastSeq/running/title/plan/queueItems 状态一致，并 notify 一次。
    * 计划状态启发式：现有页若未观察到任何计划状态则沿用旧页的。
    */
-  prependHistory(sessionId: string, entries: HistoryEntry[]): void {
+  prependHistory(sessionId: string, events: SessionEvent[]): void {
     const current = this.views.get(sessionId);
     const rebuilt = createSessionView(sessionId);
-    for (const entry of entries) foldEvent(rebuilt, entry.event);
+    for (const event of events) foldEvent(rebuilt, event);
     if (current) {
       rebuilt.nodes = [...rebuilt.nodes, ...current.nodes];
       if (current.lastSeq > rebuilt.lastSeq) rebuilt.lastSeq = current.lastSeq;

@@ -3,7 +3,7 @@ import { RemoteStreamError } from "../transport/muxStream";
 import { SessionStore } from "./store";
 import { DshSettings } from "../settings";
 import { expandHistoryRecords } from "../transport/chunkRows";
-import type { HistoryEntry, PromptResult, RpcResult, SessionFollowFrame, SessionSummary } from "../transport/types";
+import type { PromptResult, RpcResult, SessionFollowFrame, SessionSummary } from "../transport/types";
 
 export interface SessionManagerDeps {
   client: DshClient;
@@ -222,9 +222,7 @@ export class SessionManager {
       maxMessages: this.deps.settings.values.historyPageSize,
     });
     if (!res.ok) throw new Error(res.error.message);
-    const events = expandHistoryRecords(res.value.records);
-    const entries: HistoryEntry[] = events.map((event) => ({ event }));
-    this.deps.store.prependHistory(sessionId, entries);
+    this.deps.store.prependHistory(sessionId, expandHistoryRecords(res.value.records));
     return res.value.hasMore;
   }
 

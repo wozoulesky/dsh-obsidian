@@ -3,7 +3,6 @@ import type {
   AskUserQuestionAnswerItem,
   AskUserQuestionItem,
   RemoteEventDownlinkFrame,
-  RpcReceipt,
 } from "../transport/types";
 
 /** 审批请求的 waterfall request 载荷（线上形状，批 4a-2 核实）。 */
@@ -32,12 +31,6 @@ export interface PendingQuestion {
   eventId: string;
   sessionId: string;
   questions: AskUserQuestionItem[];
-}
-
-const REMOTE_EVENT_TYPES = new Set(["ready", "emit", "waterfall", "cancel"]);
-
-function isRemoteEventFrame(x: unknown): x is RemoteEventDownlinkFrame {
-  return typeof x === "object" && x !== null && REMOTE_EVENT_TYPES.has((x as { type?: unknown }).type as string);
 }
 
 export class ApprovalCenter {
@@ -82,18 +75,8 @@ export class ApprovalCenter {
    * 接入一帧 $events 下行帧（0.1.2-rc.1 waterfall 契约）：
    * ready → 绑定 clientId；waterfall → 按 event 入队；cancel → 按 eventId 出队；emit 忽略。
    */
-  ingest(frame: RemoteEventDownlinkFrame): void;
-  /**
-   * @deprecated 旧双参形态（main.ts 过渡编译兼容：MuxStream 壳 onFrame 永不回调，实为死路径）。
-   * 仅透传其中的新事件帧，批 4 接线（main.ts 改喂 RemoteEventDownlinkFrame）后删除本重载。
-   */
-  ingest(_rpcId: string, frame: unknown): void;
-  ingest(frameOrRpcId: RemoteEventDownlinkFrame | string, maybeFrame?: unknown): void {
-    if (typeof frameOrRpcId === "string") {
-      if (maybeFrame !== undefined && isRemoteEventFrame(maybeFrame)) this.handleFrame(maybeFrame);
-      return;
-    }
-    this.handleFrame(frameOrRpcId);
+  ingest(frame: RemoteEventDownlinkFrame): void {
+    this.handleFrame(frame);
   }
 
   private handleFrame(frame: RemoteEventDownlinkFrame): void {
@@ -143,19 +126,26 @@ export class ApprovalCenter {
 
   /**
    * 应答审批（waterfall 三态之 result）：value = "allowed-once" | "rejected"。
-   * 返回旧 RpcReceipt 形状（@deprecated，批 4b 改签名）；accepted:true 当且仅当 answerEvent ok。
+   * 返回 true = 应答已被服务端接受（认领成功）——此时本地出队；
+   * 官方 finishRemoteEvent 只向其它 client 广播 cancel 帧，认领方必须自己移除待决项。
+   * 返回 false = 应答失败（bad-response），调用方可提示重试；clientId 未绑定则抛错。
    */
-  async decideApproval(p: PendingApproval, outcome: "allowed-once" | "rejected"): Promise<RpcReceipt> {
+  async decideApproval(p: PendingApproval, outcome: "allowed-once" | "rejected"): Promise<boolean> {
     const clientId = this.requireClientId();
     const res = await this.client.answerEvent(clientId, p.eventId, { kind: "result", value: outcome });
-    return res.ok ? { accepted: true } : { accepted: false, reason: "bad-response" };
+    if (res.ok && this.approvals.delete(p.eventId)) this.notify();
+    return res.ok;
   }
 
-  /** 应答提问：value = {answers:[{id,selected,custom?}]}。返回旧 RpcReceipt 形状（批 4b 改签名）。 */
-  async answerQuestion(p: PendingQuestion, answers: AskUserQuestionAnswerItem[]): Promise<RpcReceipt> {
+  /**
+   * 应答提问：value = {answers:[{id,selected,custom?}]}。
+   * 返回语义同 decideApproval：true = 认领成功且本地出队；false = 失败可重试。
+   */
+  async answerQuestion(p: PendingQuestion, answers: AskUserQuestionAnswerItem[]): Promise<boolean> {
     const clientId = this.requireClientId();
     const res = await this.client.answerEvent(clientId, p.eventId, { kind: "result", value: { answers } });
-    return res.ok ? { accepted: true } : { accepted: false, reason: "bad-response" };
+    if (res.ok && this.questions.delete(p.eventId)) this.notify();
+    return res.ok;
   }
 
   private requireClientId(): string {

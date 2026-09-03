@@ -1,11 +1,11 @@
-/* DSH 线上契约类型（依据 @deepseek-ai/dsh 0.1.2-rc.1 源码 + 真机实测确认，2026-09-03 批 2 对齐）。
+/* DSH 线上契约类型（依据 @deepseek-ai/dsh 0.1.2-rc.1 源码 + 真机实测确认，2026-09-03 批 2 对齐；批 4b 清除全部旧契约残留）。
  *
  * 关键契约事实：
  * - 一元 RPC：POST /api/<namespace>/<method>（斜杠端点）；信封 {type:"client-request", rpcId, method, payload:{args:{...}}}；
  *   响应 {type:"server-response", rpcId, result:{ok:true,value}|{ok:false,error:{code,message,details?}}}。
  *   args 键集合与描述符精确一致，多余/缺失键被 gateway/arguments-invalid 拒绝。
- * - 事件流：WS /api/remote.mux（批 3 实现）；帧类型（RemoteStreamServerMessage/SessionFollowFrame/SessionControlFrame）
- *   本批定义好，批 3 直接消费。
+ * - 事件流：WS /api/remote.mux；帧类型（RemoteStreamServerMessage/SessionFollowFrame/SessionControlFrame/
+ *   RemoteEventDownlinkFrame）按流分发给 store/approvalCenter。
  * - 事件应答：$events/result 一元 RPC，args {clientId, eventId, outcome}（waterfall 三态）。
  */
 
@@ -349,79 +349,3 @@ export type SessionControlFrame =
   | { type: "queue"; sessionId: string; items: QueuedInboxItem[] }
   | { type: "jobs"; sessionId: string; jobs: unknown[] }
   | { type: "projection"; sessionId: string; key: string; value: unknown; seq: number };
-
-/* ---- 旧契约兼容层（批 3/4 文件过渡编译用；批 3/4 接线时删除） ---- */
-
-/**
- * @deprecated 旧 events.mux 服务端请求信封（0.1.2-rc.1 已改为 remote.mux 帧协议）。
- * 仅 muxStream.ts（批 3 重写对象）过渡编译使用；批 3 完成后删除。
- */
-export interface ServerRequest {
-  type: "server-request";
-  rpcId: string;
-  method: string;
-  payload: unknown;
-}
-
-/**
- * @deprecated 旧 /api/respond 回执模型（0.1.2-rc.1 已改为 answerEvent → $events/result）。
- * 仅 approvalCenter.ts / chatView.ts（批 4 接线对象）过渡编译使用；批 4 完成后删除。
- */
-export type RpcReceipt = { accepted: true } | { accepted: false; reason: "not-pending" | "bad-response" };
-
-/**
- * @deprecated 旧 session.history 端点类型（0.1.2-rc.1 已删除该端点，改为 follow snapshot + page）。
- * 仅 sessionManager.ts / store.ts（批 4 接线对象）过渡编译使用；批 4 完成后删除。
- */
-export interface HistoryPayload {
-  sessionId: string;
-  beforeSeq?: number;
-  maxMessages?: number;
-}
-
-/** @deprecated 见 HistoryPayload。 */
-export interface HistoryResult {
-  events: HistoryEntry[];
-  hasMore: boolean;
-  projections?: ProjectionsBlock;
-}
-
-/** @deprecated 见 HistoryPayload；批 4 迁移到 SessionHistoryRecord（chunks 先解包）。 */
-export interface HistoryEntry {
-  event: SessionEvent;
-  view?: unknown;
-}
-
-/* ---- mux 帧（批 3 新形态：remote.mux 物理层转发 + 逻辑帧类型，批 4 消费） ---- */
-
-/** 物理层透传信封：remote.mux 解出 {item,end,error} 后按流分发；批 4 只关心 frame，streamId 已在上游按流拆开。 */
-export interface MuxEnvelope {
-  streamId: string;
-  frame: RemoteStreamServerMessage;
-}
-
-/**
- * @deprecated 旧 MuxFrame 联合（0.1.1 的 session/event、approval/requested 等）。
- * 仅 store.applyMux / approvalCenter.ingest / chatView（批 4 接线对象）过渡编译使用；
- * 批 4 迁移到新 MuxFrame（SessionFollowFrame/SessionControlFrame/RemoteEventDownlinkFrame）后删除。
- */
-export type LegacyMuxFrame =
-  | { type: "session/event"; sessionId: string; event: SessionEvent; view?: unknown }
-  | { type: "session/subscribed"; sessionId: string; lastSeq: number }
-  | { type: "session/queue"; sessionId: string; items: QueuedInboxItem[] }
-  | { type: "session/jobs"; sessionId: string; jobs: unknown[] }
-  | { type: "session/projection"; sessionId: string; key: string; value: unknown; seq: number }
-  | { type: "approval/requested"; sessionId: string; approvalId: string; toolName: string; callId?: string; reason?: string }
-  | { type: "approval/resolved"; sessionId: string; approvalId: string; outcome: "allowed-once" | "rejected" | "cancelled" | "unavailable" }
-  | { type: "question/requested"; sessionId: string; questions: AskUserQuestionItem[] }
-  | { type: "question/resolved"; sessionId: string; questionRpcId: string; outcome: "answered" | "cancelled" }
-  | { type: "stream/error"; error: RpcError };
-
-/**
- * 批 3 事件流帧联合：物理层按流分发后、上层（store/approvalCenter，批 4）可见的逻辑帧。
- * - SessionFollowFrame：session/follow 流（snapshot + event）
- * - SessionControlFrame：session/control 流（baseline + queue/jobs/projection）
- * - RemoteEventDownlinkFrame：$events 流（ready/emit/waterfall/cancel）
- * - LegacyMuxFrame：0.1.1 旧帧变体（@deprecated 兼容 alias，批 4 接线时从联合中移除）
- */
-export type MuxFrame = SessionFollowFrame | SessionControlFrame | RemoteEventDownlinkFrame | LegacyMuxFrame;

@@ -7,7 +7,7 @@ import { clearTimer, setTimer } from "../utils/timers";
 import type { DshRuntime } from "../main";
 import type { SessionView, ViewNode } from "../core/eventFold";
 import type { PendingApproval, PendingQuestion } from "../core/approvalCenter";
-import type { AskUserQuestionAnswerItem, RpcReceipt } from "../transport/types";
+import type { AskUserQuestionAnswerItem } from "../transport/types";
 
 export const VIEW_TYPE_DSH_CHAT = "dsh-chat";
 
@@ -397,7 +397,7 @@ export class ApprovalModal extends Modal {
   constructor(
     app: App,
     private p: PendingApproval,
-    private center: { decideApproval(p: PendingApproval, outcome: "allowed-once" | "rejected"): Promise<RpcReceipt> },
+    private center: { decideApproval(p: PendingApproval, outcome: "allowed-once" | "rejected"): Promise<boolean> },
     private onCloseCb: () => void,
     private i18n: I18n
   ) {
@@ -414,17 +414,13 @@ export class ApprovalModal extends Modal {
 
   private async decide(outcome: "allowed-once" | "rejected"): Promise<void> {
     try {
-      const receipt = await this.center.decideApproval(this.p, outcome);
-      if (receipt.accepted) {
+      const claimed = await this.center.decideApproval(this.p, outcome);
+      if (claimed) {
         this.close();
         return;
       }
-      if (receipt.accepted === false && receipt.reason === "not-pending") {
-        new Notice(this.i18n.t("approval.alreadyHandled"));
-        this.close();
-        return;
-      }
-      new Notice(this.i18n.t("approval.notAccepted")); // bad-response：保留弹窗供重试
+      // 应答未被接受（bad-response）：保留弹窗供重试（旧交互保留）
+      new Notice(this.i18n.t("approval.notAccepted"));
     } catch (err) {
       new Notice(this.i18n.t("approval.failed", { message: err instanceof Error ? err.message : String(err) }));
       // 不关闭：按钮可再次点击重试
@@ -442,7 +438,7 @@ export class QuestionModal extends Modal {
   constructor(
     app: App,
     private p: PendingQuestion,
-    private center: { answerQuestion(p: PendingQuestion, answers: AskUserQuestionAnswerItem[]): Promise<RpcReceipt> },
+    private center: { answerQuestion(p: PendingQuestion, answers: AskUserQuestionAnswerItem[]): Promise<boolean> },
     private onCloseCb: () => void,
     private i18n: I18n
   ) {
@@ -486,13 +482,8 @@ export class QuestionModal extends Modal {
 
   private async submit(): Promise<void> {
     try {
-      const receipt = await this.center.answerQuestion(this.p, this.answers);
-      if (receipt.accepted) {
-        this.close();
-        return;
-      }
-      if (receipt.accepted === false && receipt.reason === "not-pending") {
-        new Notice(this.i18n.t("question.alreadyHandled"));
+      const claimed = await this.center.answerQuestion(this.p, this.answers);
+      if (claimed) {
         this.close();
         return;
       }

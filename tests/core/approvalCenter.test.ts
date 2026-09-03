@@ -33,7 +33,7 @@ describe("ApprovalCenter（0.1.2-rc.1 waterfall 契约）", () => {
     const center = new ApprovalCenter(client);
     center.ingest({ type: "ready", clientId: "c-1", host: { home: "C:/Users/test" } });
     center.ingest({ type: "ready", clientId: "c-2", host: { home: "C:/Users/test" } }); // 流重开换 id，覆盖
-    center.ingest({ type: "waterfall", event: "approval/request", eventId: "e1", agentId: "s1", request: approvalRequest });
+    center.ingest(waterfall("approval/request", "e1", "s1", approvalRequest));
     void center.decideApproval(center.pendingApprovals[0], "allowed-once");
     expect(calls[0].clientId).toBe("c-2");
   });
@@ -91,37 +91,42 @@ describe("ApprovalCenter（0.1.2-rc.1 waterfall 契约）", () => {
     expect(changed).toBe(0);
   });
 
-  it("decideApproval → answerEvent 精确载荷 {clientId,eventId,outcome:{kind:result,value:allowed-once}}", async () => {
+  it("decideApproval → answerEvent 精确载荷 {clientId,eventId,outcome:{kind:result,value:allowed-once}}；成功认领本地出队", async () => {
     const { client, calls } = makeClient();
     const center = new ApprovalCenter(client);
     center.ingest({ type: "ready", clientId: "c-1", host: { home: "C:/Users/test" } });
     center.ingest(waterfall("approval/request", "e1", "s1", approvalRequest));
-    const receipt = await center.decideApproval(center.pendingApprovals[0], "allowed-once");
-    expect(receipt).toEqual({ accepted: true });
+    expect(center.pendingApprovals).toHaveLength(1);
+    const claimed = await center.decideApproval(center.pendingApprovals[0], "allowed-once");
+    expect(claimed).toBe(true);
+    // 官方 finishRemoteEvent 只向其它 client 广播 cancel：认领方必须自己移除待决项
+    expect(center.pendingApprovals).toHaveLength(0);
     expect(calls).toEqual([
       { clientId: "c-1", eventId: "e1", outcome: { kind: "result", value: "allowed-once" } },
     ]);
   });
 
-  it("answerQuestion → value {answers} 精确载荷", async () => {
+  it("answerQuestion → value {answers} 精确载荷；成功认领本地出队", async () => {
     const { client, calls } = makeClient();
     const center = new ApprovalCenter(client);
     center.ingest({ type: "ready", clientId: "c-1", host: { home: "C:/Users/test" } });
     center.ingest(waterfall("user-questions/request", "e2", "s1", questionRequest));
-    const receipt = await center.answerQuestion(center.pendingQuestions[0], [{ id: "q1", selected: ["A"] }]);
-    expect(receipt).toEqual({ accepted: true });
+    const claimed = await center.answerQuestion(center.pendingQuestions[0], [{ id: "q1", selected: ["A"] }]);
+    expect(claimed).toBe(true);
+    expect(center.pendingQuestions).toHaveLength(0);
     expect(calls).toEqual([
       { clientId: "c-1", eventId: "e2", outcome: { kind: "result", value: { answers: [{ id: "q1", selected: ["A"] }] } } },
     ]);
   });
 
-  it("answerEvent 失败 → accepted:false（bad-response）", async () => {
+  it("answerEvent 失败 → 返回 false 且待决项保留（弹窗可重试）", async () => {
     const { client } = makeClient({ answerEvent: async () => ({ ok: false }) });
     const center = new ApprovalCenter(client);
     center.ingest({ type: "ready", clientId: "c-1", host: { home: "C:/Users/test" } });
     center.ingest(waterfall("approval/request", "e1", "s1", approvalRequest));
-    const receipt = await center.decideApproval(center.pendingApprovals[0], "allowed-once");
-    expect(receipt).toEqual({ accepted: false, reason: "bad-response" });
+    const claimed = await center.decideApproval(center.pendingApprovals[0], "allowed-once");
+    expect(claimed).toBe(false);
+    expect(center.pendingApprovals).toHaveLength(1); // 保留供重试
   });
 
   it("clientId 未绑定时 decideApproval/answerQuestion 抛明确错误", async () => {
@@ -134,15 +139,5 @@ describe("ApprovalCenter（0.1.2-rc.1 waterfall 契约）", () => {
     await expect(center.decideApproval(p, "rejected")).rejects.toThrow(/clientId 未绑定/);
     await expect(center.answerQuestion(q, [])).rejects.toThrow(/clientId 未绑定/);
     expect(calls).toHaveLength(0);
-  });
-
-  it("兼容重载 ingest(rpcId, frame)：透传新帧、非事件帧忽略（main.ts 旧双参死路径）", () => {
-    const { client } = makeClient();
-    const center = new ApprovalCenter(client);
-    center.ingest("legacy-rpc-id", { type: "ready", clientId: "c-1", host: { home: "C:/Users/test" } });
-    center.ingest("legacy-rpc-id", { type: "approval/requested", sessionId: "s1", approvalId: "a1", toolName: "write" });
-    expect(center.pendingApprovals).toHaveLength(0); // 旧帧不识别 → 忽略
-    center.ingest("legacy-rpc-id", waterfall("approval/request", "e1", "s1", approvalRequest));
-    expect(center.pendingApprovals).toHaveLength(1);
   });
 });

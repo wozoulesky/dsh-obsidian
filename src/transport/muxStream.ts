@@ -23,37 +23,6 @@ import { clearTimer, setTimer } from "../utils/timers";
 
 export type MuxState = "connected" | "reconnecting";
 
-/**
- * @deprecated 旧 MuxSink 形状（0.1.1 events.mux）。仅 main.ts（批 4 接线对象）过渡编译使用；
- * 批 4 迁移到 RemoteMuxTransport（onState 状态回调）后删除。
- */
-export interface MuxSink {
-  onFrame(rpcId: string, frame: import("./types").MuxFrame): void;
-  onState(state: MuxState): void;
-}
-
-/**
- * @deprecated 旧 MuxStream 兼容壳（0.1.1 /api/events.mux 纯下行流）。
- * 0.1.2-rc.1 已无该端点：仅保持旧 surface（构造/start/stop/onState）让 main.ts 过渡编译，
- * 不建立任何连接——onState 恒报 "reconnecting"，onFrame 永不回调。
- * 批 4 main.ts 接线 RemoteMuxTransport（client.mux.start()/stop()）时删除本壳。
- */
-export class MuxStream {
-  constructor(
-    _baseUrl: string,
-    private sink: MuxSink,
-    _options: { backoffBaseMs?: number; backoffMaxMs?: number } = {}
-  ) {}
-
-  start(): void {
-    this.sink.onState("reconnecting");
-  }
-
-  stop(): void {
-    /* 兼容壳：无资源可释放 */
-  }
-}
-
 /** 物理载体故障（连接断开/坏帧/停用）：可重试的流终止原因，与官方 RemoteStreamCarrierError 对应。 */
 export class RemoteStreamCarrierError extends Error {
   constructor(message: string) {
@@ -77,7 +46,7 @@ export interface RemoteMuxTransportOptions {
   auth?: DshCookieAuth;
   /** 测试注入：cookieHeader 函数（返回完整 Cookie 头值，不含 Cookie: 前缀）。 */
   cookieHeader?: () => Promise<string>;
-  /** 状态变化（去重后的转换）：沿用旧 MuxSink.onState 语义，批 4 main.ts 沿用。 */
+  /** 状态变化（去重后的转换）：main.ts 接状态栏。 */
   onState?: (state: MuxState) => void;
 }
 

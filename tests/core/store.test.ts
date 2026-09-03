@@ -1,25 +1,30 @@
 import { describe, expect, it } from "vitest";
 import { SessionStore } from "../../src/core/store";
-import type { MuxFrame, SessionControlFrame, SessionFollowFrame } from "../../src/transport/types";
+import type { SessionControlFrame, SessionFollowFrame } from "../../src/transport/types";
+
+function userEvent(seq: number, text: string, id = `m${seq}`) {
+  return {
+    type: "user/message",
+    seq,
+    time: seq,
+    data: { id, role: "user", content: [{ type: "text", text }], source: { kind: "user" } },
+  };
+}
 
 describe("SessionStore", () => {
-  it("session/event 帧折叠进对应会话视图", () => {
+  it("applyFollowEvent 折叠事件进对应会话视图", () => {
     const store = new SessionStore();
     store.ensureView("s1");
-    store.applyMux("r1", {
-      type: "session/event",
-      sessionId: "s1",
-      event: { type: "user/message", seq: 1, time: 1, data: { id: "m1", role: "user", content: [{ type: "text", text: "hi" }], source: { kind: "user" } } },
-    });
+    store.applyFollowEvent("s1", { type: "event", event: userEvent(1, "hi") });
     const view = store.ensureView("s1");
     expect(view.nodes).toHaveLength(1);
     expect(view.nodes[0]).toMatchObject({ kind: "user", text: "hi" });
   });
 
-  it("session/projection 更新 title 与 plan", () => {
+  it("applyControlFrame projection 更新 title 与 plan", () => {
     const store = new SessionStore();
-    store.applyMux("r1", { type: "session/projection", sessionId: "s1", key: "title", value: "标题A", seq: 1 });
-    store.applyMux("r2", { type: "session/projection", sessionId: "s1", key: "plan", value: { active: true, pending: true }, seq: 2 });
+    store.applyControlFrame({ type: "projection", sessionId: "s1", key: "title", value: "标题A", seq: 1 });
+    store.applyControlFrame({ type: "projection", sessionId: "s1", key: "plan", value: { active: true, pending: true }, seq: 2 });
     const view = store.ensureView("s1");
     expect(view.title).toBe("标题A");
     expect(view.plan).toEqual({ active: true, pending: true });
@@ -27,15 +32,21 @@ describe("SessionStore", () => {
 
   it("投影按 higher-seq-wins 覆盖，旧 seq 不覆盖新值", () => {
     const store = new SessionStore();
-    store.applyMux("r1", { type: "session/projection", sessionId: "s1", key: "title", value: "新", seq: 5 });
-    store.applyMux("r2", { type: "session/projection", sessionId: "s1", key: "title", value: "旧", seq: 3 });
+    store.applyControlFrame({ type: "projection", sessionId: "s1", key: "title", value: "新", seq: 5 });
+    store.applyControlFrame({ type: "projection", sessionId: "s1", key: "title", value: "旧", seq: 3 });
     expect(store.ensureView("s1").title).toBe("新");
   });
 
-  it("session/subscribed 更新 lastSeq 基线", () => {
+  it("applyFollowSnapshot 以 snapshot 的 lastSeq 建立基线（lastSeq 跟随最大 seq）", () => {
     const store = new SessionStore();
-    store.ensureView("s1");
-    store.applyMux("r1", { type: "session/subscribed", sessionId: "s1", lastSeq: 42 });
+    store.applyFollowSnapshot("s1", {
+      type: "snapshot",
+      header: { version: 1, id: "s1", createdAt: 1 },
+      cursor: 42,
+      records: [{ type: "event", event: userEvent(42, "hi") }],
+      hasMore: false,
+      projections: { asOfSeq: 0, values: {} },
+    });
     expect(store.ensureView("s1").lastSeq).toBe(42);
   });
 
@@ -44,8 +55,8 @@ describe("SessionStore", () => {
     let changed = 0;
     store.onChange(() => changed++);
     store.seedHistory("s1", [
-      { event: { type: "session/title", seq: 1, time: 1, data: { title: "T", source: "fallback" } } },
-      { event: { type: "user/message", seq: 2, time: 2, data: { id: "m1", role: "user", content: [{ type: "text", text: "hello" }], source: { kind: "user" } } } },
+      { type: "session/title", seq: 1, time: 1, data: { title: "T", source: "fallback" } },
+      userEvent(2, "hello"),
     ]);
     const view = store.ensureView("s1");
     expect(view.title).toBe("T");
@@ -53,34 +64,29 @@ describe("SessionStore", () => {
     expect(changed).toBe(1);
   });
 
-  it("unknown 帧类型被安全忽略", () => {
+  it("applyControlFrame jobs 帧被安全忽略（不触发 notify）", () => {
     const store = new SessionStore();
-    store.applyMux("r1", { type: "whatever/else" } as unknown as MuxFrame);
-    expect(store.ensureView("s1").nodes).toHaveLength(0);
+    let changed = 0;
+    store.onChange(() => changed++);
+    store.applyControlFrame({ type: "jobs", sessionId: "s1", jobs: [{ id: "j1" }] });
+    expect(changed).toBe(0);
+    expect(store.getView("s1")).toBeUndefined();
   });
 
   it("onChange 返回解除函数，解除后不再收到通知", () => {
     const store = new SessionStore();
     let changed = 0;
     const off = store.onChange(() => changed++);
-    store.seedHistory("s1", [
-      { event: { type: "user/message", seq: 1, time: 1, data: { id: "m1", role: "user", content: [{ type: "text", text: "a" }], source: { kind: "user" } } } },
-    ]);
+    store.seedHistory("s1", [userEvent(1, "a")]);
     expect(changed).toBe(1);
     off();
-    store.seedHistory("s1", [
-      { event: { type: "user/message", seq: 2, time: 2, data: { id: "m2", role: "user", content: [{ type: "text", text: "b" }], source: { kind: "user" } } } },
-    ]);
+    store.seedHistory("s1", [userEvent(2, "b")]);
     expect(changed).toBe(1);
   });
 
-  it("applyMux 不会为未打开过的会话物化视图", () => {
+  it("applyFollowEvent 不会为未打开过的会话物化视图", () => {
     const store = new SessionStore();
-    store.applyMux("r1", {
-      type: "session/event",
-      sessionId: "never-opened",
-      event: { type: "user/message", seq: 1, time: 1, data: { id: "m1", role: "user", content: [{ type: "text", text: "hi" }], source: { kind: "user" } } },
-    });
+    store.applyFollowEvent("never-opened", { type: "event", event: userEvent(1, "hi") });
     expect(store.getView("never-opened")).toBeUndefined();
   });
 
@@ -88,16 +94,12 @@ describe("SessionStore", () => {
     const store = new SessionStore();
     let changed = 0;
     store.onChange(() => changed++);
-    store.seedHistory("s1", [
-      { event: { type: "user/message", seq: 5, time: 5, data: { id: "m2", role: "user", content: [{ type: "text", text: "新消息" }], source: { kind: "user" } } } },
-    ]);
+    store.seedHistory("s1", [userEvent(5, "新消息", "m2")]);
     const before = store.ensureView("s1");
     before.running = true;
     before.title = "新标题";
     changed = 0;
-    store.prependHistory("s1", [
-      { event: { type: "user/message", seq: 1, time: 1, data: { id: "m1", role: "user", content: [{ type: "text", text: "旧消息" }], source: { kind: "user" } } } },
-    ]);
+    store.prependHistory("s1", [userEvent(1, "旧消息", "m1")]);
     const view = store.ensureView("s1");
     expect(view.nodes.map((n) => (n.kind === "user" ? n.text : ""))).toEqual(["旧消息", "新消息"]);
     expect(view.lastSeq).toBe(5);
@@ -108,11 +110,11 @@ describe("SessionStore", () => {
 
   it("dropView 同时清除投影单元", () => {
     const store = new SessionStore();
-    store.applyMux("r1", { type: "session/projection", sessionId: "s1", key: "title", value: "T", seq: 1 });
+    store.applyControlFrame({ type: "projection", sessionId: "s1", key: "title", value: "T", seq: 1 });
     store.dropView("s1");
     store.ensureView("s1");
     // 旧投影单元已清除：更低 seq 的新投影不应被旧的更高 seq 拒绝
-    store.applyMux("r2", { type: "session/projection", sessionId: "s1", key: "title", value: "新T", seq: 0 });
+    store.applyControlFrame({ type: "projection", sessionId: "s1", key: "title", value: "新T", seq: 0 });
     expect(store.ensureView("s1").title).toBe("新T");
   });
 });
@@ -134,7 +136,7 @@ describe("SessionStore 批4 follow/control 帧", () => {
           type: "chunks",
           event: { type: "chunkrow/text-chunks", seq: 5, time: 100, data: { turn: 1, step: 1, index: 0, dt: [2], texts: ["你", "好"] } },
         },
-        { type: "event", event: { type: "user/message", seq: 8, time: 108, data: { id: "m", role: "user", content: [{ type: "text", text: "hi" }], source: { kind: "user" } } } },
+        { type: "event", event: userEvent(8, "hi") },
       ])
     );
     const view = store.ensureView("s1");

@@ -29,10 +29,6 @@ import {
   type SessionListResult,
   type SessionPage,
   type SessionPageRequest,
-  type SessionEvent,
-  type HistoryPayload,
-  type HistoryResult,
-  type RpcReceipt,
 } from "./types";
 import { DshAuthError, type DshCookieAuth } from "./auth";
 import { RemoteMuxTransport, type RemoteMuxTransportOptions } from "./muxStream";
@@ -238,36 +234,5 @@ export class DshClient {
 
   cancel(payload: CancelPayload): Promise<RpcResult<CancelResult>> {
     return this.call<CancelResult>("session/cancel", { request: payload as unknown as Record<string, unknown> });
-  }
-
-  /* ---- 旧契约兼容层（@deprecated；批 3/4 接线时删除） ---- */
-
-  /**
-   * @deprecated 旧 /api/respond 回执模型（0.1.2-rc.1 已移除）。仅 approvalCenter.ts 过渡编译使用，
-   * 批 4 接线迁移到 answerEvent；本方法直接返回 bad-response。
-   */
-  async respond<T>(_rpcId: string, _value: T): Promise<RpcReceipt> {
-    return { accepted: false, reason: "bad-response" };
-  }
-
-  /**
-   * @deprecated 旧 session.history 端点（0.1.2-rc.1 已删除）。仅 sessionManager.ts 过渡编译使用，
-   * 批 4 接线迁移到 follow snapshot + page。
-   * 过渡实现：走 session/page（throughSeq:-1），只映射 {type:"event"} 记录；
-   * {type:"chunks"} 压缩行的解包是批 3 的工作，本过渡实现跳过（批 4 由解包层补齐）。
-   * 注意：真机 throughSeq:-1 返回空页（官方 paginate end=min(0,0)=0），批 4 必须改用 follow cursor。
-   */
-  async history(payload: HistoryPayload): Promise<RpcResult<HistoryResult>> {
-    const res = await this.page({
-      address: { kind: "session", sessionId: payload.sessionId },
-      throughSeq: -1,
-      beforeSeq: payload.beforeSeq,
-      maxMessages: payload.maxMessages,
-    });
-    if (!res.ok) return res;
-    const events = res.value.records
-      .filter((r): r is { type: "event"; event: SessionEvent } => r.type === "event")
-      .map((r) => ({ event: r.event }));
-    return { ok: true, value: { events, hasMore: res.value.hasMore } };
   }
 }

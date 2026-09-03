@@ -2,7 +2,9 @@ import { Editor, Notice, Plugin, WorkspaceLeaf } from "obsidian";
 import { installNodeShims } from "./transport/nodeShims";
 import { DshSettings } from "./settings";
 import { DshClient } from "./transport/client";
-import { MuxStream, type MuxState } from "./transport/muxStream";
+import { DshCookieAuth } from "./transport/auth";
+import type { MuxState, RemoteMuxTransport } from "./transport/muxStream";
+import type { RemoteEventDownlinkFrame, SessionControlFrame } from "./transport/types";
 import { SessionStore } from "./core/store";
 import { SessionManager } from "./core/sessionManager";
 import { ApprovalCenter } from "./core/approvalCenter";
@@ -17,7 +19,8 @@ export interface DshRuntime {
   settings: DshSettings;
   i18n: I18n;
   client: DshClient;
-  mux: MuxStream;
+  /** remote.mux 物理层（client.mux）：main.ts 接状态栏与生命周期，会话 follow 由 SessionManager 按需开。 */
+  mux: RemoteMuxTransport;
   store: SessionStore;
   manager: SessionManager;
   approvals: ApprovalCenter;
@@ -41,44 +44,91 @@ export default class DshPlugin extends Plugin {
         ["dsh-bridge.i18n.json", `${this.manifest.dir ?? `.obsidian/plugins/${this.manifest.id}`}/i18n.json`],
         (path) => this.app.vault.adapter.read(path)
       );
-      const client = new DshClient({ baseUrl: this.settings.dshUrl });
+
       const store = new SessionStore();
+      const baseUrl = this.settings.dshUrl;
+      let runtime: DshRuntime;
+
+      /* ---- 两条全局长流（$events / session/control）的当前代句柄：重连重开时 abort 旧代，避免残留迭代与新代串流 ---- */
+      let eventsStreamGen: AbortController | null = null;
+      let controlStreamGen: AbortController | null = null;
+
+      /** 重开 $events 流：abort 旧代 → openStream → 每帧 approvals.ingest；断线/异常静默结束，下次 onState("connected") 重开。 */
+      const startEventsStream = (): void => {
+        const controller = new AbortController();
+        eventsStreamGen?.abort();
+        eventsStreamGen = controller;
+        void (async () => {
+          try {
+            const stream = await runtime.client.openStream<RemoteEventDownlinkFrame>("$events", {}, controller.signal);
+            for await (const frame of stream) {
+              if (controller.signal.aborted) return;
+              runtime.approvals.ingest(frame);
+            }
+          } catch {
+            /* 断线（RemoteStreamCarrierError）/ abort / 流错误：静默结束；重连由 onState("connected") 触发重开 */
+          }
+        })();
+      };
+
+      /** 重开 session/control 流：abort 旧代 → openStream → 每帧 store.applyControlFrame。服务端语义：每代首帧重发 baseline，无需本地重建。 */
+      const startControlStream = (): void => {
+        const controller = new AbortController();
+        controlStreamGen?.abort();
+        controlStreamGen = controller;
+        void (async () => {
+          try {
+            const stream = await runtime.client.openStream<SessionControlFrame>("session/control", {}, controller.signal);
+            for await (const frame of stream) {
+              if (controller.signal.aborted) return;
+              runtime.store.applyControlFrame(frame);
+            }
+          } catch {
+            /* 断线/异常：静默结束；重连由 onState("connected") 触发重开（服务端会重发 baseline） */
+          }
+        })();
+      };
+
+      const client = new DshClient({
+        baseUrl,
+        auth: new DshCookieAuth({ baseUrl }),
+        transportOptions: {
+          onState: (state) => {
+            runtime.muxState = state;
+            this.statusBarEl.setText(state === "connected" ? i18n.t("main.statusConnected") : i18n.t("main.statusReconnecting"));
+            if (state === "connected") {
+              // 物理连接就绪：重开两条全局流（首次连接与每次重连统一走这里；
+              // $events 重开会拿新 clientId，approvals 由 ready 帧重新绑定）
+              startEventsStream();
+              startControlStream();
+              // 重连后 resync current 会话与内联编辑会话（沿用旧逻辑：view 存在的才重建）
+              void (async () => {
+                const targets = new Set<string>();
+                if (runtime.manager.currentId) targets.add(runtime.manager.currentId);
+                const inlineId = this.settings.values.inlineEditSessionId;
+                if (inlineId && runtime.store.getView(inlineId)) targets.add(inlineId);
+                for (const id of targets) {
+                  runtime.manager.resyncSession(id).catch((err) => console.error("[dsh-bridge] 重连同步失败:", err));
+                }
+              })();
+            }
+          },
+        },
+      });
       const approvals = new ApprovalCenter(client);
       const manager = new SessionManager({ client, store, vaultPath: this.vaultPath(), settings: this.settings, t: (key, params) => i18n.t(key, params) });
-      const runtime: DshRuntime = {
+      runtime = {
         plugin: this,
         settings: this.settings,
         i18n,
         client,
+        mux: client.mux,
         store,
         manager,
         approvals,
-        mux: undefined as unknown as MuxStream,
         inlineEdit: undefined as unknown as InlineEditService,
         muxState: null,
       };
-      const mux = new MuxStream(this.settings.dshUrl, {
-        onFrame: (rpcId, frame) => {
-          store.applyMux(rpcId, frame);
-          approvals.ingest(rpcId, frame);
-        },
-        onState: (state) => {
-          runtime.muxState = state;
-          this.statusBarEl.setText(state === "connected" ? i18n.t("main.statusConnected") : i18n.t("main.statusReconnecting"));
-          if (state === "connected") {
-            void (async () => {
-              const targets = new Set<string>();
-              if (manager.currentId) targets.add(manager.currentId);
-              const inlineId = this.settings.values.inlineEditSessionId;
-              if (inlineId && store.getView(inlineId)) targets.add(inlineId);
-              for (const id of targets) {
-                manager.resyncSession(id).catch((err) => console.error("[dsh-bridge] 重连同步失败:", err));
-              }
-            })();
-          }
-        },
-      });
-      runtime.mux = mux;
       runtime.inlineEdit = new InlineEditService({ manager, store, settings: this.settings, t: (key, params) => i18n.t(key, params) });
       this.runtime = runtime;
 
@@ -106,7 +156,7 @@ export default class DshPlugin extends Plugin {
       });
       this.addSettingTab(new DshSettingTab(this.app, this));
 
-      mux.start();
+      client.mux.start();
       manager.refresh().catch((err) => console.error("[dsh-bridge] 会话列表拉取失败:", err));
     } catch (err) {
       try {
