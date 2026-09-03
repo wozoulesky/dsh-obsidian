@@ -281,12 +281,14 @@ describe("DshCookieAuth（真实文件路径：<homedir>/.dsh/.credentials.yaml�
   it("并发取 cookie 只读一次凭据文件（refresh 去抖）", async () => {
     let reads = 0;
     writeFileSync(credsPath, credsYaml(encodeBase64Url(SECRET_A)));
+    const fixedNow = 1700000000000;
     const auth = new DshCookieAuth({
       baseUrl: "http://127.0.0.1:3080",
       readCredentialsFile: async () => {
         reads++;
         return credsYaml(encodeBase64Url(SECRET_A));
       },
+      nowMs: () => fixedNow, // 固定时钟：两个并发的 issuedAt 一致，h1===h2 断言不受毫秒差影响（flaky 根因）
     });
     const [h1, h2] = await Promise.all([auth.cookieHeader(), auth.cookieHeader()]);
     expect(reads).toBe(1);
