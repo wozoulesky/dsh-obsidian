@@ -271,18 +271,12 @@ export interface RemoteEventCancellationFrame {
   eventId: string;
 }
 
-/** 官方 $events 流首个 item 携带的 watermark 帧（应答/流代数关联用；批 4 需要时消费）。 */
-export interface RemoteEventWatermarkFrame {
-  type: "watermark";
-  eventId: string;
-}
-
+/** 官方 $events 流首个 item 就是 ready 帧本身（见 RemoteEventReadyFrame）；流内只有 ready/emit/waterfall/cancel 四型，无 watermark 帧（已对照 0.1.2-rc.1 官方源码核实）。 */
 export type RemoteEventDownlinkFrame =
   | RemoteEventReadyFrame
   | RemoteEventEmitFrame
   | RemoteEventWaterfallFrame
-  | RemoteEventCancellationFrame
-  | RemoteEventWatermarkFrame;
+  | RemoteEventCancellationFrame;
 
 /**
  * waterfall 应答 outcome 三态：
@@ -316,7 +310,7 @@ export type RemoteStreamEnd = { type: "end"; streamId: string };
 export type RemoteStreamError = {
   type: "error";
   streamId: string;
-  error: { code: string; message: string; details?: Record<string, unknown> };
+  error: { code: string; message: string; details: Record<string, unknown> };
 };
 export type RemoteStreamServerMessage = RemoteStreamItem | RemoteStreamEnd | RemoteStreamError;
 
@@ -427,7 +421,7 @@ export type LegacyMuxFrame =
  * 批 3 事件流帧联合：物理层按流分发后、上层（store/approvalCenter，批 4）可见的逻辑帧。
  * - SessionFollowFrame：session/follow 流（snapshot + event）
  * - SessionControlFrame：session/control 流（baseline + queue/jobs/projection）
- * - RemoteEventDownlinkFrame：$events 流（ready/emit/waterfall/cancel/watermark）
+ * - RemoteEventDownlinkFrame：$events 流（ready/emit/waterfall/cancel）
  * - LegacyMuxFrame：0.1.1 旧帧变体（@deprecated 兼容 alias，批 4 接线时从联合中移除）
  */
 export type MuxFrame = SessionFollowFrame | SessionControlFrame | RemoteEventDownlinkFrame | LegacyMuxFrame;

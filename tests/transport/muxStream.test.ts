@@ -233,6 +233,41 @@ describe("RemoteMuxTransport cancel 与消费方终止", () => {
     await waitFor(() => received.some((m) => m.type === "cancel" && m.streamId === streamId), 2000, "cancel frame");
     transport.stop();
   });
+
+  it("连接未建立（open 帧未发出）时 abort → 迭代立即抛错不挂起（!opened 哨兵路径）", async () => {
+    // 无服务端口：socket 永远连不上，open 帧无从发出（opened=false）
+    const tmpPort = await new Promise<number>((resolve) => {
+      const probe = new net.Server();
+      probe.listen(0, "127.0.0.1", () => {
+        const addr = probe.address();
+        probe.close(() => resolve(typeof addr === "object" && addr ? addr.port : 0));
+      });
+    });
+    const { transport } = makeTransport({ baseUrl: `http://127.0.0.1:${tmpPort}`, backoffBaseMs: 5000, backoffMaxMs: 5000 });
+    const controller = new AbortController();
+    transport.start();
+    const iter = transport.open("session/control", {}, controller.signal)[Symbol.asyncIterator]();
+    const first = iter.next();
+    const rejection = expect(first).rejects.toThrow("user cancelled");
+    controller.abort(new Error("user cancelled"));
+    await rejection; // 若不立即抛错，本断言会超时失败
+    transport.stop();
+  });
+
+  it("stop 后 start 复活：建立新连接且陈旧定时器不触发第二条", async () => {
+    const { transport } = makeTransport({ backoffBaseMs: 100 });
+    transport.start();
+    await waitFor(() => sockets.length > 0, 2000, "socket connected");
+    const countAfterStart = sockets.length;
+    transport.stop();
+    await new Promise((r) => setTimeout(r, 200));
+    expect(sockets.length).toBe(countAfterStart); // stop 后不再新建连接
+    transport.start();
+    await waitFor(() => sockets.length === countAfterStart + 1, 2000, "reconnected after restart");
+    await new Promise((r) => setTimeout(r, 300));
+    expect(sockets.length).toBe(countAfterStart + 1); // 陈旧定时器不触发第二条
+    transport.stop();
+  });
 });
 
 describe("RemoteMuxTransport 坏帧与断线", () => {
