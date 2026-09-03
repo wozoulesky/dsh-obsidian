@@ -64,7 +64,9 @@ npm test       # 单元测试
 
 ## 架构
 
-传输层：一元 RPC 走 Node `http`（`POST /api/<method>`、`/api/respond`）；事件流走 `ws` WebSocket（`/api/events.mux`，服务端拒绝 SSE）。核心层把会话事件折叠为视图模型；UI 层渲染侧边栏与弹窗。
+传输层：一元 RPC 走 Node `http`（`POST /api/<namespace>/<method>` + `{args}` 载荷 + 自签 browser-session cookie）；事件流走 `ws` WebSocket（`/api/remote.mux` — `session/follow`、`session/control`、`$events`）。核心层把会话事件折叠为视图模型；UI 层渲染侧边栏与弹窗。
+
+**需要 DSH ≥ 0.1.2-rc.1。** 旧版 DSH（如 0.1.0-rc.6）会返回 401/404——请升级 DSH，或将插件回退到 0.1.4。
 
 ## 关联项目
 

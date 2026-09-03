@@ -97,10 +97,16 @@ export class InlineEditService {
 
   private async ensureSession(): Promise<string> {
     const stored = this.deps.settings.values.inlineEditSessionId;
-    if (stored && (await this.deps.manager.exists(stored))) return stored;
+    if (stored && (await this.deps.manager.exists(stored))) {
+      // 新契约没有全会话广播：内联编辑专用会话的 follow 需主动开（0.1.4 靠 events.mux 兜底，0.1.2 已删除）。
+      // resyncSession 不改变 currentId，只重建该会话视图并挂 follow 消费循环（事件源）。
+      await this.deps.manager.resyncSession(stored).catch(() => undefined); // 失败不阻塞：exists 已确认会话在
+      return stored;
+    }
     const id = await this.deps.manager.newSession();
     this.deps.settings.values.inlineEditSessionId = id;
     await this.deps.settings.save().catch(() => undefined); // 保存失败不阻塞（下次重建即可）
+    await this.deps.manager.resyncSession(id).catch(() => undefined);
     return id;
   }
 

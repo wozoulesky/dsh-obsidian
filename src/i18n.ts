@@ -85,7 +85,7 @@ export const DEFAULT_STRINGS: Record<string, string> = {
 
   // 设置
   "settings.dshUrlName": "DSH 地址",
-  "settings.dshUrlDesc": "本地 DSH 服务地址（默认 http://127.0.0.1:3080）",
+  "settings.dshUrlDesc": "本地 DSH 服务地址（默认 http://127.0.0.1:3080）。需要 DSH ≥ 0.1.2-rc.1；旧版 DSH 会报 401/404（请升级）",
   "settings.mentionMaxCharsName": "@提及文件内容上限（字符）",
   "settings.mentionMaxCharsDesc": "提及文件时注入内容的最大长度，超长截断",
   "settings.inlineEditTimeoutName": "内联编辑超时（秒）",
