@@ -1,5 +1,6 @@
 import { createSessionView, foldEvent, type SessionView } from "./eventFold";
-import type { HistoryEntry, MuxFrame } from "../transport/types";
+import type { HistoryEntry, MuxFrame, ProjectionsBlock, SessionControlFrame, SessionFollowFrame } from "../transport/types";
+import { expandHistoryRecords } from "../transport/chunkRows";
 
 interface ProjectionCell {
   value: unknown;
@@ -66,6 +67,8 @@ export class SessionStore {
   }
 
   /** 处理一帧 mux 推送；事件/队列/基线仅作用于已存在的视图（避免为所有已挂载会话物化视图），投影则允许播种（含未打开会话的标题/计划）。 */
+  // 批4 TODO：applyMux 是旧 events.mux 帧消费（0.1.2-rc.1 已无上游），
+  // 由 applyFollowSnapshot/applyFollowEvent/applyControlFrame 取代；批 4b 接线 main.ts 后删除本方法与 LegacyMuxFrame 依赖。
   applyMux(_rpcId: string, frame: MuxFrame): void {
     switch (frame.type) {
       case "session/event": {
@@ -106,6 +109,73 @@ export class SessionStore {
       default:
         break; // 审批/提问/jobs/stream-error 由 ApprovalCenter 等处理，store 忽略
     }
+  }
+
+  /**
+   * 播种 follow 快照（批 4）：展开 chunkrow → 折叠进视图；snapshot.projections 逐键播种
+   * （title/plan 等投影以 asOfSeq 为水位，higher-seq-wins）。
+   */
+  applyFollowSnapshot(sessionId: string, frame: Extract<SessionFollowFrame, { type: "snapshot" }>): void {
+    const view = this.ensureView(sessionId);
+    for (const event of expandHistoryRecords(frame.records)) foldEvent(view, event);
+    this.applyProjectionsBlock(sessionId, frame.projections);
+    this.notify();
+  }
+
+  /** follow 流的事件帧：仅折叠进已存在的视图（未打开会话不物化，沿用旧 session/event 语义）。 */
+  applyFollowEvent(sessionId: string, frame: Extract<SessionFollowFrame, { type: "event" }>): void {
+    const view = this.views.get(sessionId);
+    if (!view) return;
+    foldEvent(view, frame.event);
+    this.notify();
+  }
+
+  /**
+   * 消费 session/control 流帧（批 4）：baseline 全量播种队列/投影（投影允许播种含未打开会话；
+   * 队列仅物化到已存在视图）；增量帧对应更新。jobs 帧忽略（插件不展示任务）。
+   */
+  applyControlFrame(frame: SessionControlFrame): void {
+    let changed = false;
+    switch (frame.type) {
+      case "baseline": {
+        // 队列只作用于帧开始前已存在的视图：投影允许播种（会物化未打开会话），
+        // 若按播种后的视图集合处理队列，未打开会话也会被队列物化（违反旧语义）。
+        const existing = new Set(this.views.keys());
+        for (const [sessionId, block] of Object.entries(frame.value.projections)) {
+          changed = this.applyProjectionsBlock(sessionId, block) || changed;
+        }
+        for (const [sessionId, items] of Object.entries(frame.value.queues)) {
+          if (!existing.has(sessionId)) continue;
+          const view = this.views.get(sessionId) as SessionView;
+          view.queueItems = items;
+          changed = true;
+        }
+        break;
+      }
+      case "queue": {
+        const view = this.views.get(frame.sessionId);
+        if (!view) break;
+        view.queueItems = frame.items;
+        changed = true;
+        break;
+      }
+      case "projection": {
+        changed = this.applyProjection(frame.sessionId, frame.key, frame.value, frame.seq);
+        break;
+      }
+      case "jobs":
+        break; // 忽略
+    }
+    if (changed) this.notify();
+  }
+
+  /** 播种一个投影块（逐键 applyProjection，水位为 block.asOfSeq）。 */
+  private applyProjectionsBlock(sessionId: string, block: ProjectionsBlock): boolean {
+    let changed = false;
+    for (const [key, value] of Object.entries(block.values)) {
+      changed = this.applyProjection(sessionId, key, value, block.asOfSeq) || changed;
+    }
+    return changed;
   }
 
   /** 用历史页播种视图（调用方负责保证 seq 递增顺序）。 */
