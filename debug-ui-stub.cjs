@@ -43,6 +43,7 @@ class FakeElement {
     return el;
   }
   createSpan(opts) { return this.createEl("span", opts); }
+  appendText(t) { this.text += String(t); return this; }
   /** 深度优先收集子树全部文本。 */
   collectText() {
     const out = [];
@@ -62,6 +63,23 @@ class FakeElement {
     };
     walk(this);
     return out;
+  }
+  /** 深度优先收集指定 tag 的元素。 */
+  queryByTag(tag) {
+    const out = [];
+    const walk = (el) => {
+      if (el.tag === tag) out.push(el);
+      for (const c of el.children) walk(c);
+    };
+    walk(this);
+    return out;
+  }
+  /** 手动触发已注册的某类事件（仿真 DOM 事件冒泡前的叶子触发）。 */
+  fire(type, event = {}) {
+    for (const fn of this.listeners.get(type) ?? []) {
+      try { fn(event); } catch (err) { console.error(`[ui-stub] ${type} listener threw:`, err); }
+    }
+    return this;
   }
 }
 
@@ -109,17 +127,49 @@ class PluginSettingTab {
   constructor(app, plugin) { this.app = app; this.plugin = plugin; this.containerEl = new FakeElement("div"); }
 }
 class Modal {
-  constructor(app) { this.app = app; this.contentEl = new FakeElement("div"); this.titleEl = { setText() {} }; }
-  open() {}
-  close() {}
+  constructor(app) {
+    this.app = app;
+    this.contentEl = new FakeElement("div");
+    this.titleEl = new FakeElement("div");
+    this._opened = false;
+    this._closed = false;
+    this.onCloseCb = null;
+  }
+  open() {
+    this._opened = true;
+    this.onOpen();
+    return this;
+  }
+  close() {
+    if (this._closed) return;
+    this._closed = true;
+    this.onClose();
+    return this;
+  }
+  /** 弹窗内按钮执行（Setting.addButton 已把回调挂到按钮元素上）。 */
+  clickButtonByText(text) {
+    const btn = this.contentEl.queryByTag("button").find((b) => b.text === text);
+    if (!btn) throw new Error(`button "${text}" not found`);
+    btn.fire("click");
+    return this;
+  }
 }
 class Notice { constructor() {} }
 class Setting {
-  constructor() { this.container = new FakeElement("div"); }
+  constructor(container) { this.container = container; this.buttonDefs = []; }
   setName() { return this; }
   setDesc() { return this; }
   addText() { return this; }
-  addButton() { return { setButtonText() { return this; }, setCta() { return this; }, onClick() { return this; } }; }
+  addButton(cb) {
+    const btnEl = this.container.createEl("button");
+    const builder = {
+      setButtonText: (t) => { btnEl.setText(t); return builder; },
+      setCta: () => builder,
+      onClick: (fn) => { btnEl.addEventListener("click", fn); return builder; },
+    };
+    cb(builder);
+    return this;
+  }
 }
 class MarkdownRenderer { static render(app, text, el, path, component) { el.setText(text); return Promise.resolve(); } }
 class TFile {}
