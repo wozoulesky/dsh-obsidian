@@ -34,6 +34,10 @@ export class SessionManager {
   }
 
   private displayTitle(s: SessionSummary): string {
+    // 线上 list 的 projections 只有 sessionListMetadata/imageLimits/modelSelection（无 title，官方核实）；
+    // 标题靠 control baseline 播种进 store 视图——优先读视图，list 字段仅作兜底。
+    const viewTitle = this.deps.store.getView(s.sessionId)?.title;
+    if (typeof viewTitle === "string" && viewTitle.length > 0) return viewTitle;
     const title = s.projections?.values?.title;
     if (typeof title === "string" && title.length > 0) return title;
     return this.deps.t("chat.sessionFallback", { id: s.sessionId.slice(0, 8) });
@@ -56,6 +60,9 @@ export class SessionManager {
   sessionTitle(sessionId: string): string {
     const summary = this.sessions.find((s) => s.sessionId === sessionId);
     if (summary) return this.displayTitle(summary);
+    // 列表尚无该会话（新建未刷新）时也读 store 视图标题兜底
+    const viewTitle = this.deps.store.getView(sessionId)?.title;
+    if (typeof viewTitle === "string" && viewTitle.length > 0) return viewTitle;
     return this.deps.t("chat.sessionFallback", { id: sessionId.slice(0, 8) });
   }
 

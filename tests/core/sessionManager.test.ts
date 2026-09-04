@@ -313,6 +313,17 @@ describe("SessionManager 批4a-3（follow 驱动）", () => {
     expect(store.getView("vault-1")?.title).toBe("重连标题");
   });
 
+  it("sessionTitle：store 视图标题优先于 list 投影（线上 list 无 title）", async () => {
+    const stream = makeStream<SessionFollowFrame>();
+    const { manager, store } = makeManager({ openStream: async () => stream.iterator });
+    const p = manager.openSession("vault-1");
+    stream.push(snapshot({ projections: { asOfSeq: 10, values: { title: "视图标题" } } }));
+    await p;
+    expect(manager.sessionTitle("vault-1")).toBe("视图标题");
+    // 未打开会话回退 list 投影（如有）
+    expect(store.getView("vault-1")?.title).toBe("视图标题");
+  });
+
   it("prompt/cancel 转发到 client", async () => {
     const { manager } = makeManager();
     const res = await manager.prompt("s", "你好", "queue");
