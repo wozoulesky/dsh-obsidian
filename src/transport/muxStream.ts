@@ -169,6 +169,9 @@ export class RemoteMuxTransport {
   private readonly backoffMaxMs: number;
   private readonly cookie: (() => Promise<string>) | undefined;
   private readonly onState: ((state: MuxState) => void) | undefined;
+  private focusCleanup: (() => void) | null = null;
+  /** 最近一次连接失败是否为 ECONNREFUSED（服务未启动）：决定退避策略。 */
+  private lastRefused = false;
 
   constructor(
     private baseUrl: string,
@@ -197,6 +200,7 @@ export class RemoteMuxTransport {
   /** 开始物理连接保持（空闲也保持连接，与官方「keeps it connected while idle」一致）。 */
   start(): void {
     if (this.stopped) this.stopped = false;
+    if (!this.focusCleanup) this.installFocusReconnect(); // 渲染进程挂失焦重连兜底（Node 测试环境 window 为 globalThis 别名）
     if (this.socket?.readyState === WS_OPEN || this.pendingConnect) return;
     void this.connect().catch(() => {
       /* 失败已由 close 路径调度退避重试 */
@@ -210,6 +214,8 @@ export class RemoteMuxTransport {
       clearTimer(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    this.focusCleanup?.();
+    this.focusCleanup = null;
     this.generation++; // 在途 socket 与连接尝试全部失效
     const socket = this.socket;
     this.socket = null;
@@ -353,8 +359,11 @@ export class RemoteMuxTransport {
           finish(() => reject(new RemoteStreamCarrierError("api gateway: Remote stream WebSocket closed before opening")));
           this.onLost(socket);
         });
-        socket.on("error", () => {
-          /* close 事件随后触发；这里不直接重连，避免与 close 重复调度 */
+        socket.on("error", (err) => {
+          /* close 事件随后触发；记录 ECONNREFUSED 供 close 路径选择退避策略（服务未启动时固定短间隔轮询） */
+          if (err && typeof err === "object" && (err as { code?: string }).code === "ECONNREFUSED") {
+            this.lastRefused = true;
+          }
         });
       })();
     });
@@ -393,7 +402,10 @@ export class RemoteMuxTransport {
   private scheduleReconnect(): void {
     if (this.stopped || this.reconnectTimer !== null) return;
     this.attempt += 1;
-    const delay = backoffDelay(this.attempt, this.backoffBaseMs, this.backoffMaxMs);
+    // 服务未启动（ECONNREFUSED）：固定 2s 轮询（DSH 启动通常 10~30 秒，2s 间隔保证就绪后最坏 2 秒发现）；
+    // 其它失败（握手失败/坏帧/凭据）才指数退避。
+    const delay = this.lastRefused ? 2000 : backoffDelay(this.attempt, this.backoffBaseMs, this.backoffMaxMs);
+    this.lastRefused = false;
     this.reconnectTimer = setTimer(() => {
       this.reconnectTimer = null;
       if (!this.stopped && !this.socket) {
@@ -402,6 +414,44 @@ export class RemoteMuxTransport {
         });
       }
     }, delay);
+  }
+
+  /**
+   * 窗口失焦时 Electron/Chromium 会节流 setTimeout（background timer throttling），
+   * 退避定时器可能被拖慢到远超预期（真机复测 #5：封顶 8s 仍 +11.6s 未恢复）。
+   * 挂 window focus 监听：窗口重新激活/聚焦时立即尝试重连，绕开被节流的定时器。
+   * 无 addEventListener 的环境（Node 测试）静默跳过——测试由 scheduleReconnect 退避覆盖。
+   */
+  private installFocusReconnect(): void {
+    const win = window as unknown as { addEventListener?: (t: string, h: () => void) => void; removeEventListener?: (t: string, h: () => void) => void };
+    if (!win.addEventListener) return;
+    const handler = () => {
+      if (this.stopped || this.socket) return;
+      if (this.reconnectTimer !== null) {
+        clearTimer(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
+      void this.connect().catch(() => {
+        /* 失败继续走 close 路径退避 */
+      });
+    };
+    win.addEventListener("focus", handler);
+    // visibilitychange 兜底（某些 Electron 版本 focus 不触发时，切回可见也重连）
+    const doc = (globalThis as unknown as { document?: { visibilityState?: string; addEventListener?: (t: string, h: () => void) => void; removeEventListener?: (t: string, h: () => void) => void } }).document;
+    if (doc?.addEventListener) {
+      const visHandler = () => {
+        if (doc.visibilityState === "visible") handler();
+      };
+      doc.addEventListener("visibilitychange", visHandler);
+      this.focusCleanup = () => {
+        win.removeEventListener?.("focus", handler);
+        doc.removeEventListener?.("visibilitychange", visHandler);
+      };
+    } else {
+      this.focusCleanup = () => {
+        win.removeEventListener?.("focus", handler);
+      };
+    }
   }
 
   private failAll(error: Error): void {
