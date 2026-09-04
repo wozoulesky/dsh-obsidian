@@ -50,14 +50,21 @@ describe("SessionStore", () => {
     expect(store.ensureView("s1").lastSeq).toBe(42);
   });
 
-  it("seedHistory 按序折叠并触发变更回调", () => {
+  it("applyFollowSnapshot 播种事件（等价旧 seedHistory 语义）并触发变更回调", () => {
     const store = new SessionStore();
     let changed = 0;
     store.onChange(() => changed++);
-    store.seedHistory("s1", [
-      { type: "session/title", seq: 1, time: 1, data: { title: "T", source: "fallback" } },
-      userEvent(2, "hello"),
-    ]);
+    store.applyFollowSnapshot("s1", {
+      type: "snapshot",
+      header: { version: 1, id: "s1", createdAt: 1 },
+      cursor: 2,
+      records: [
+        { type: "event", event: { type: "session/title", seq: 1, time: 1, data: { title: "T", source: "fallback" } } },
+        { type: "event", event: userEvent(2, "hello") },
+      ],
+      hasMore: false,
+      projections: { asOfSeq: 0, values: {} },
+    });
     const view = store.ensureView("s1");
     expect(view.title).toBe("T");
     expect(view.nodes).toHaveLength(1);
@@ -77,10 +84,24 @@ describe("SessionStore", () => {
     const store = new SessionStore();
     let changed = 0;
     const off = store.onChange(() => changed++);
-    store.seedHistory("s1", [userEvent(1, "a")]);
+    store.applyFollowSnapshot("s1", {
+      type: "snapshot",
+      header: { version: 1, id: "s1", createdAt: 1 },
+      cursor: 1,
+      records: [{ type: "event", event: userEvent(1, "a") }],
+      hasMore: false,
+      projections: { asOfSeq: 0, values: {} },
+    });
     expect(changed).toBe(1);
     off();
-    store.seedHistory("s1", [userEvent(2, "b")]);
+    store.applyFollowSnapshot("s1", {
+      type: "snapshot",
+      header: { version: 1, id: "s1", createdAt: 1 },
+      cursor: 2,
+      records: [{ type: "event", event: userEvent(2, "b") }],
+      hasMore: false,
+      projections: { asOfSeq: 0, values: {} },
+    });
     expect(changed).toBe(1);
   });
 
@@ -94,7 +115,14 @@ describe("SessionStore", () => {
     const store = new SessionStore();
     let changed = 0;
     store.onChange(() => changed++);
-    store.seedHistory("s1", [userEvent(5, "新消息", "m2")]);
+    store.applyFollowSnapshot("s1", {
+      type: "snapshot",
+      header: { version: 1, id: "s1", createdAt: 1 },
+      cursor: 5,
+      records: [{ type: "event", event: userEvent(5, "新消息", "m2") }],
+      hasMore: false,
+      projections: { asOfSeq: 0, values: {} },
+    });
     const before = store.ensureView("s1");
     before.running = true;
     before.title = "新标题";

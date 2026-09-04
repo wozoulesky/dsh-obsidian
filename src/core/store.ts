@@ -133,13 +133,6 @@ export class SessionStore {
     return changed;
   }
 
-  /** 用已展开的历史事件播种视图（调用方负责保证 seq 递增顺序）。 */
-  seedHistory(sessionId: string, events: SessionEvent[]): void {
-    const view = this.ensureView(sessionId);
-    for (const event of events) foldEvent(view, event);
-    this.notify();
-  }
-
   /**
    * 前插一页更早的历史：在 store 内重建视图（折叠旧页 + 拼接现有节点），
    * 保证 lastSeq/running/title/plan/queueItems 状态一致，并 notify 一次。
