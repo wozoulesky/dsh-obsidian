@@ -4,10 +4,10 @@ import { DshSettings } from "./settings";
 import { DshClient } from "./transport/client";
 import { DshCookieAuth } from "./transport/auth";
 import type { MuxState, RemoteMuxTransport } from "./transport/muxStream";
-import type { RemoteEventDownlinkFrame, SessionControlFrame } from "./transport/types";
 import { SessionStore } from "./core/store";
 import { SessionManager } from "./core/sessionManager";
 import { ApprovalCenter } from "./core/approvalCenter";
+import { GlobalStreams } from "./core/globalStreams";
 import { InlineEditService } from "./core/inlineEdit";
 import { DshChatView, VIEW_TYPE_DSH_CHAT } from "./ui/chatView";
 import { InlineEditModal } from "./ui/inlineEditModal";
@@ -32,6 +32,8 @@ export default class DshPlugin extends Plugin {
   settings = new DshSettings(this);
   runtime!: DshRuntime;
   statusBarEl!: HTMLElement;
+  /** 两条全局长流的生命周期（onload 创建，onunload stop）。 */
+  private globalStreams: GlobalStreams | null = null;
 
   async onload(): Promise<void> {
     try {
@@ -49,46 +51,6 @@ export default class DshPlugin extends Plugin {
       const baseUrl = this.settings.dshUrl;
       let runtime: DshRuntime;
 
-      /* ---- 两条全局长流（$events / session/control）的当前代句柄：重连重开时 abort 旧代，避免残留迭代与新代串流 ---- */
-      let eventsStreamGen: AbortController | null = null;
-      let controlStreamGen: AbortController | null = null;
-
-      /** 重开 $events 流：abort 旧代 → openStream → 每帧 approvals.ingest；断线/异常静默结束，下次 onState("connected") 重开。 */
-      const startEventsStream = (): void => {
-        const controller = new AbortController();
-        eventsStreamGen?.abort();
-        eventsStreamGen = controller;
-        void (async () => {
-          try {
-            const stream = await runtime.client.openStream<RemoteEventDownlinkFrame>("$events", {}, controller.signal);
-            for await (const frame of stream) {
-              if (controller.signal.aborted) return;
-              runtime.approvals.ingest(frame);
-            }
-          } catch {
-            /* 断线（RemoteStreamCarrierError）/ abort / 流错误：静默结束；重连由 onState("connected") 触发重开 */
-          }
-        })();
-      };
-
-      /** 重开 session/control 流：abort 旧代 → openStream → 每帧 store.applyControlFrame。服务端语义：每代首帧重发 baseline，无需本地重建。 */
-      const startControlStream = (): void => {
-        const controller = new AbortController();
-        controlStreamGen?.abort();
-        controlStreamGen = controller;
-        void (async () => {
-          try {
-            const stream = await runtime.client.openStream<SessionControlFrame>("session/control", {}, controller.signal);
-            for await (const frame of stream) {
-              if (controller.signal.aborted) return;
-              runtime.store.applyControlFrame(frame);
-            }
-          } catch {
-            /* 断线/异常：静默结束；重连由 onState("connected") 触发重开（服务端会重发 baseline） */
-          }
-        })();
-      };
-
       const client = new DshClient({
         baseUrl,
         auth: new DshCookieAuth({ baseUrl }),
@@ -99,8 +61,7 @@ export default class DshPlugin extends Plugin {
             if (state === "connected") {
               // 物理连接就绪：重开两条全局流（首次连接与每次重连统一走这里；
               // $events 重开会拿新 clientId，approvals 由 ready 帧重新绑定）
-              startEventsStream();
-              startControlStream();
+              this.globalStreams?.startAll();
               // 重连后 resync current 会话与内联编辑会话（沿用旧逻辑：view 存在的才重建）
               void (async () => {
                 const targets = new Set<string>();
@@ -117,6 +78,7 @@ export default class DshPlugin extends Plugin {
       });
       const approvals = new ApprovalCenter(client);
       const manager = new SessionManager({ client, store, vaultPath: this.vaultPath(), settings: this.settings, t: (key, params) => i18n.t(key, params) });
+      this.globalStreams = new GlobalStreams(client, store, approvals);
       runtime = {
         plugin: this,
         settings: this.settings,
@@ -189,6 +151,7 @@ export default class DshPlugin extends Plugin {
   }
 
   onunload(): void {
+    this.globalStreams?.stop();
     this.runtime?.mux?.stop();
   }
 }
