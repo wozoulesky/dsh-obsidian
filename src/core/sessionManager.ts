@@ -130,6 +130,7 @@ export class SessionManager {
       );
       if (epoch !== this.openEpoch) {
         controller.abort();
+        void stream[Symbol.asyncIterator]().return?.().catch(() => undefined); // 驱动物理层 cancel（终审 M-4 收口）
         return; // 竞态守卫：期间已切换到其他会话
       }
       this.deps.store.dropView(sessionId); // 重建干净视图再播种
@@ -137,6 +138,7 @@ export class SessionManager {
       const first = await iterator.next();
       if (epoch !== this.openEpoch || controller.signal.aborted) {
         controller.abort();
+        void iterator.return?.().catch(() => undefined); // 丢弃路径收口：驱动 cancel，避免 inbox 残留至断线
         return;
       }
       if (first.done) throw new Error("DSH follow 流在首帧前结束");

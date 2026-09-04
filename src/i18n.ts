@@ -47,7 +47,6 @@ export const DEFAULT_STRINGS: Record<string, string> = {
   "approval.noReason": "（未说明理由）",
   "approval.reject": "拒绝",
   "approval.allowOnce": "允许一次",
-  "approval.alreadyHandled": "该审批已在别处处理",
   "approval.notAccepted": "应答未被接受，请重试",
   "approval.failed": "审批应答失败，请重试：{message}",
 
@@ -55,7 +54,6 @@ export const DEFAULT_STRINGS: Record<string, string> = {
   "question.title": "DSH 想问你几个问题",
   "question.freeAnswer": "自由回答",
   "question.submit": "提交",
-  "question.alreadyHandled": "该提问已在别处处理",
   "question.notAccepted": "应答未被接受，请重试",
   "question.failed": "提问应答失败，请重试：{message}",
 
