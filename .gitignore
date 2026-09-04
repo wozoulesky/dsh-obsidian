@@ -7,5 +7,8 @@ docs/superpowers/
 # 本地排障工具（stub 加载 main.js，仅限本机）
 debug-*.cjs
 
-# release tgz ����⣨GitHub Release ������
+# 探针/冒烟/真机验收证据（本机开发产物，含本机路径；不上传 GitHub）
+tmp/
+
+# release tgz 生成物（GitHub Release 附件）
 *.tgz
