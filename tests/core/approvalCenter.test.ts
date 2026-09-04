@@ -140,4 +140,20 @@ describe("ApprovalCenter（0.1.2-rc.1 waterfall 契约）", () => {
     await expect(center.answerQuestion(q, [])).rejects.toThrow(/clientId 未绑定/);
     expect(calls).toHaveLength(0);
   });
+
+  it("$events 流重开换新 clientId：旧代 pending 项在新代下应答用新 clientId（批 4b 重开竞态语义）", async () => {
+    const { client, calls } = makeClient();
+    const center = new ApprovalCenter(client);
+    center.ingest({ type: "ready", clientId: "gen-1", host: { home: "C:/Users/test" } });
+    center.ingest(waterfall("approval/request", "e1", "s1", approvalRequest));
+    // 断线 → 重开：服务端换新 clientId 并重放 pending 事件（官方 openRemoteEvents 语义）
+    center.ingest({ type: "ready", clientId: "gen-2", host: { home: "C:/Users/test" } });
+    // 重放同一 eventId（服务端 pending 重放）：入队覆盖同键，不产生重复弹窗
+    center.ingest(waterfall("approval/request", "e1", "s1", approvalRequest));
+    expect(center.pendingApprovals).toHaveLength(1);
+    const claimed = await center.decideApproval(center.pendingApprovals[0], "allowed-once");
+    expect(claimed).toBe(true);
+    expect(calls[0].clientId).toBe("gen-2"); // 应答用最新代 clientId
+    expect(calls[0].eventId).toBe("e1");
+  });
 });
