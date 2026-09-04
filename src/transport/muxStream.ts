@@ -140,9 +140,9 @@ export function parseRemoteStreamServerMessage(text: string): RemoteStreamServer
     Object.prototype.hasOwnProperty.call(value.error, "code") &&
     Object.prototype.hasOwnProperty.call(value.error, "message") &&
     Object.prototype.hasOwnProperty.call(value.error, "details") &&
-    typeof (value.error as Record<string, unknown>).code === "string" &&
-    typeof (value.error as Record<string, unknown>).message === "string" &&
-    isRecord((value.error as Record<string, unknown>).details)
+    typeof value.error.code === "string" &&
+    typeof value.error.message === "string" &&
+    isRecord(value.error.details)
   ) {
     return value as unknown as RemoteStreamServerMessage;
   }
@@ -200,7 +200,7 @@ export class RemoteMuxTransport {
   /** 开始物理连接保持（空闲也保持连接，与官方「keeps it connected while idle」一致）。 */
   start(): void {
     if (this.stopped) this.stopped = false;
-    if (!this.focusCleanup) this.installFocusReconnect(); // 渲染进程挂失焦重连兜底（Node 测试环境 window 为 globalThis 别名）
+    if (!this.focusCleanup) this.installFocusReconnect(); // 渲染进程挂失焦重连兜底（Node 测试环境 window 为测试注入的别名）
     if (this.socket?.readyState === WS_OPEN || this.pendingConnect) return;
     void this.connect().catch(() => {
       /* 失败已由 close 路径调度退避重试 */
@@ -437,7 +437,8 @@ export class RemoteMuxTransport {
     };
     win.addEventListener("focus", handler);
     // visibilitychange 兜底（某些 Electron 版本 focus 不触发时，切回可见也重连）
-    const doc = (globalThis as unknown as { document?: { visibilityState?: string; addEventListener?: (t: string, h: () => void) => void; removeEventListener?: (t: string, h: () => void) => void } }).document;
+    // 用 typeof 探测（避免 global 对象；Node 测试环境无 document → 跳过 visibility 路径，focus 已覆盖）
+    const doc: { visibilityState?: string; addEventListener?: (t: string, h: () => void) => void; removeEventListener?: (t: string, h: () => void) => void } | undefined = typeof document === "undefined" ? undefined : document;
     if (doc?.addEventListener) {
       const visHandler = () => {
         if (doc.visibilityState === "visible") handler();

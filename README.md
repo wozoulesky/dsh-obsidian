@@ -68,6 +68,8 @@ Transport: unary RPC over Node `http` (`POST /api/<namespace>/<method>` with `{a
 
 **Requires DSH ≥ 0.1.2-rc.1.** Older DSH versions (e.g. 0.1.0-rc.6) return 401/404 — upgrade DSH, or downgrade the plugin to 0.1.4.
 
+**Direct filesystem access (disclosed for community review):** DSH's browser-session authentication requires reading the signing secret from `~/.dsh/.credentials.yaml` (the DSH process's credentials store, outside the vault). The plugin reads this file **read-only** — it never writes, never logs its contents, and only uses the secret to sign the per-request cookie required by DSH 0.1.2-rc.1's API. The vault API cannot reach this path (it is outside the vault root), so Node `fs` is required for this one purpose.
+
 ## Related
 
 - [obsidian-project-management](https://github.com/wozoulesky/obsidian-project-management) — the Obsidian-based project management skill that governs this plugin's development workflow (project records are tracked in a local Obsidian vault).

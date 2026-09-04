@@ -1,6 +1,7 @@
 .dsh-chat { display: flex; flex-direction: column; height: 100%; }
-/* 显隐控制用 class 而非直接 style 赋值（社区审核规则 obsidianmd/no-static-styles-assignment） */
-.dsh-hidden { display: none !important; }
+/* 显隐控制用 class 而非直接 style 赋值（社区审核规则 obsidianmd/no-static-styles-assignment）。
+   dsh-hidden 仅用于无 display 声明的元素（按钮/状态条/横幅），与 .dsh-chat 的 flex 无冲突，无需强制优先级。 */
+.dsh-hidden { display: none; }
 .dsh-hidden-visually { visibility: hidden; }
 .dsh-chat-header { padding: 8px; border-bottom: 1px solid var(--background-modifier-border); }
 .dsh-chat-status { font-size: 0.85em; color: var(--text-muted); }

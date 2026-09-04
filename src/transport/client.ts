@@ -209,6 +209,7 @@ export class DshClient {
    * 成功值官方为 undefined（dispatchRpc 返回 {ok:true, value:void 0}），批 4 只关心 ok 与否。
    */
   answerEvent(clientId: string, eventId: string, outcome: RemoteEventOutcome): Promise<RpcResult<undefined>> {
+    // RemoteEventResultArgs 无索引签名：需要转 Record<string, unknown>（接口化的契约类型不隐式兼容）
     const args: RemoteEventResultArgs = { clientId, eventId, outcome };
     return this.call<undefined>("$events/result", args as unknown as Record<string, unknown>);
   }
@@ -218,21 +219,21 @@ export class DshClient {
   }
 
   create(payload: SessionCreatePayload): Promise<RpcResult<SessionCreateResult>> {
-    return this.call<SessionCreateResult>("session/create", { request: payload as unknown as Record<string, unknown> });
+    return this.call<SessionCreateResult>("session/create", { request: payload });
   }
 
   /** prompt：客户端自铸 requestId（UUID），必填；缺省时 mintId 补上。 */
   prompt(payload: PromptRequestInput): Promise<RpcResult<PromptResult>> {
     const request: PromptPayload = { ...payload, requestId: payload.requestId ?? mintId() };
-    return this.call<PromptResult>("session/prompt", { request: request as unknown as Record<string, unknown> });
+    return this.call<PromptResult>("session/prompt", { request });
   }
 
   /** 分页历史（新契约）：address 为 {kind:"session", sessionId}，throughSeq 必填（-1 = 到尾）。 */
   page(payload: SessionPageRequest): Promise<RpcResult<SessionPage>> {
-    return this.call<SessionPage>("session/page", { request: payload as unknown as Record<string, unknown> });
+    return this.call<SessionPage>("session/page", { request: payload });
   }
 
   cancel(payload: CancelPayload): Promise<RpcResult<CancelResult>> {
-    return this.call<CancelResult>("session/cancel", { request: payload as unknown as Record<string, unknown> });
+    return this.call<CancelResult>("session/cancel", { request: payload });
   }
 }

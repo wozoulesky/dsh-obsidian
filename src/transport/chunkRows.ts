@@ -89,11 +89,11 @@ export function expandChunkRowEvent(row: ChunkRowEvent): ExpandedChunkEvent[] {
  */
 export function expandChunkRow(record: SessionHistoryRecord): SessionEvent[] {
   if (typeof record !== "object" || record === null) {
-    return [record as unknown as SessionEvent];
+    return [record as SessionEvent];
   }
   if (record.type === "event") return [record.event];
   if (record.type === "chunks") return expandChunkRowEvent(record.event);
-  return [record as unknown as SessionEvent];
+  return [record as SessionEvent];
 }
 
 /** 展开一个历史记录数组（页面/快照 records 的整体解包入口，批 4 播种用）。 */
