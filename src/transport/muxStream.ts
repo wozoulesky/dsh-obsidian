@@ -175,7 +175,9 @@ export class RemoteMuxTransport {
     options: RemoteMuxTransportOptions = {}
   ) {
     this.backoffBaseMs = options.backoffBaseMs ?? 500;
-    this.backoffMaxMs = options.backoffMaxMs ?? 30000;
+    // 封顶 8s（旧 30s 使 DSH 重启期间 attempt 推到高位后恢复等待最长 30~32 秒，真机验收 #5「33 秒未恢复」根因）：
+    // 本地 DSH 启动约 10~30 秒，期间会失败数次推高 attempt；8s 封顶保证服务就绪后最坏 8 秒内恢复。
+    this.backoffMaxMs = options.backoffMaxMs ?? 8000;
     this.onState = options.onState;
     const auth = options.auth;
     if (options.cookieHeader) this.cookie = options.cookieHeader;

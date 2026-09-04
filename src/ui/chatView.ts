@@ -304,6 +304,7 @@ export class DshChatView extends ItemView {
       this.olderHasMore = null;
     }
 
+    this.olderBtn.removeClass("dsh-hidden"); // 有视图时移除初始无视图分支留下的 display:none（真机验收 #4 根因：按钮永远不可见）
     this.olderBtn.toggleClass("dsh-hidden-visually", this.olderHasMore === false);
     this.runningEl.toggleClass("dsh-hidden", !view.running);
     this.emptyEl.addClass("dsh-hidden");
