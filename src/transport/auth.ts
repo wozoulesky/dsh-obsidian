@@ -202,15 +202,24 @@ export function extractSecretFromYaml(yamlText: string, recordKey: string = CRED
  * 读取 `$DSH_HOME` 环境变量（DSH 官方用它可以改变 home 目录，凭据随之落在 `<DSH_HOME>/.credentials.yaml`）。
  *
  * 渲染进程没有 `process` 全局，故沿 `nodeShims.ts` 的做法用 `window` 探测、
- * 拿不到就返回 undefined（**绝不抛**）——这是尽力而为的兜底，不是唯一途径。
+ * 拿不到就返回 undefined——这是尽力而为的兜底，不是唯一途径。
  * 用户目录经 GUI 启动时环境变量常不传递，因此另有设置项 `dshCredentialsPath` 作为确定性途径。
+ *
+ * **本函数保证绝不抛**（整体 try/catch）：它在插件 `onload` 路径上被调用，
+ * 一旦抛出会让整个插件加载失败（onload 的 catch 只写 load-error.log 后 rethrow）。
+ * 而 `window.process` 可能是宿主注入的垫片对象，其 `env` 甚至有可能是会抛的 getter——
+ * 任何异常都必须吞掉并退回「没有该变量」。
  */
 export function readDshHomeEnv(): string | undefined {
-  if (typeof window === "undefined") return undefined;
-  const g = window as unknown as Record<string, unknown>;
-  const proc = g.process as { env?: Record<string, string | undefined> } | undefined;
-  const value = proc?.env?.DSH_HOME;
-  return typeof value === "string" && value.length > 0 ? value : undefined;
+  try {
+    if (typeof window === "undefined") return undefined;
+    const g = window as unknown as Record<string, unknown>;
+    const proc = g.process as { env?: Record<string, string | undefined> } | undefined;
+    const value = proc?.env?.DSH_HOME;
+    return typeof value === "string" && value.length > 0 ? value : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

@@ -207,6 +207,18 @@ describe("readDshHomeEnv（$DSH_HOME 尽力而为读取）", () => {
     g.process = { env: { DSH_HOME: 123 } };
     expect(readDshHomeEnv()).toBeUndefined();
   });
+
+  it("env 是「会抛的 getter」时也不抛 → undefined（本函数在 onload 路径上，抛会毁掉整个插件）", () => {
+    const throwing = {};
+    Object.defineProperty(throwing, "env", {
+      get() {
+        throw new Error("hostile env getter");
+      },
+    });
+    g.process = throwing;
+    expect(() => readDshHomeEnv()).not.toThrow();
+    expect(readDshHomeEnv()).toBeUndefined();
+  });
 });
 
 describe("DshCookieAuth（注入读取函数）", () => {
