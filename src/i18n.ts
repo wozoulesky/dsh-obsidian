@@ -41,6 +41,40 @@ export const DEFAULT_STRINGS: Record<string, string> = {
   "chat.commandLineWithText": "{status} 命令 {name}：{text}",
   "chat.toolRunning": "（执行中）",
   "chat.toolError": "（失败）",
+  "chat.reasoning": "思考过程",
+  "chat.reasoningRunning": "（生成中）",
+  "chat.contextUsage": "上下文 {used} / {window}",
+  "chat.contextUsageNoWindow": "上下文 {used}",
+  "chat.usageOutput": "输出 {tokens}",
+  "chat.todos": "待办",
+  "chat.todosDone": "{count} 已完成",
+  "chat.todosActive": "{count} 进行中",
+  "chat.todosPending": "{count} 待处理",
+  "chat.imageCount": "🖼 图片 ×{count}",
+
+  // 命令真执行（TASK-030）
+  "chat.commandDone": "命令 {name} 已执行",
+  "chat.commandDoneWithText": "命令 {name} 已执行：{text}",
+  "chat.commandFailed": "命令 {name} 执行失败：{text}",
+  "chat.commandSendFailed": "命令执行失败：{message}",
+
+  // 模型 / 推理档位（TASK-030）
+  "chat.effortDefault": "服务端默认",
+  "chat.modelSwitchFailed": "切换模型失败：{message}",
+  "chat.goalPlaceholder": "目标（例如：完成 X 并给出验证证据）",
+  "chat.goalCreate": "创建目标",
+  "chat.goalSave": "保存",
+  "chat.goalPause": "暂停",
+  "chat.goalResume": "继续",
+  "chat.goalComplete": "完成",
+  "chat.goalEdit": "编辑",
+  "chat.goalClear": "清除",
+  "chat.goalRounds": "第 {rounds} / {max} 轮",
+  "chat.goalPhasePaused": "已暂停",
+  "chat.goalPhaseBlocked": "受阻",
+  "chat.goalPhaseComplete": "已完成",
+  "chat.goalFailed": "目标操作失败：{message}",
+  "chat.interruptedTurnDropped": "上一回合因 DSH 中断未保存（内容未落库，无法续传）",
 
   // 审批弹窗
   "approval.title": "DSH 请求执行：{toolName}",
@@ -59,6 +93,13 @@ export const DEFAULT_STRINGS: Record<string, string> = {
 
   // 输入框
   "input.placeholder": "给 DSH 发任务…（/ 命令，@ 提及文件，Shift+Tab 计划模式）",
+  "input.attachImage": "📎 添加图片",
+  "input.imagePlaceholder": "选择要发送给 DSH 的图片…",
+  "input.imageReadFailed": "图片读取失败（文件可能已被移动或删除）",
+  "input.imageUnsupportedType": "不支持的图片格式，仅支持：{types}",
+  "input.imageTooMany": "一次最多发送 {count} 张图片",
+  "input.imageTooLarge": "图片过大（单张上限 {size}）",
+  "input.imageTotalTooLarge": "图片总量过大（单条消息上限 {size}），请分次发送",
 
   // 内联编辑
   "inline.promptNoSelection": "请先在编辑器中选择要修改的文本。",
@@ -100,12 +141,14 @@ export const DEFAULT_STRINGS: Record<string, string> = {
   "settings.exportI18nDone": "已导出 dsh-bridge.i18n.json 到 vault 根目录，翻译后重载插件生效",
   "settings.exportI18nFailed": "导出失败：{message}",
 
-  // 内置命令联想
+  // 内置命令联想（离线兜底清单；在线时描述用服务端返回的）
   "command.clear.desc": "清空当前会话并新建干净会话（/clear）",
   "command.plan.desc": "进入计划模式（/plan off 退出）",
   "command.compact.desc": "压缩会话历史",
+  "command.export.desc": "把会话日志导出为 ZIP 下载",
   "command.feedback.desc": "给最近的回复打分反馈",
   "command.goal.desc": "管理长期目标（/goal create <目标>）",
+  "command.permission.desc": "切换权限预设（沙箱模式 + 审批策略）",
 };
 
 export class I18n {

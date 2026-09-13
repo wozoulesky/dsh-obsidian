@@ -24,3 +24,48 @@
 .dsh-diff-add { background: var(--background-modifier-success); }
 .dsh-diff-del { background: var(--background-modifier-error); text-decoration: line-through; }
 .dsh-diff-eq { color: var(--text-normal); }
+/* 思考过程折叠块（assistant 正文上方）：流式期间默认展开跟随，收尾后折叠。
+   左侧竖线 + 弱化配色，与工具卡（边框卡片）区分开，避免两类折叠块视觉混淆。 */
+.dsh-reasoning { border-left: 2px solid var(--background-modifier-border); border-radius: 4px; padding: 2px 8px; margin: 6px 0; font-size: 0.9em; }
+.dsh-reasoning summary { cursor: pointer; color: var(--text-muted); }
+.dsh-reasoning-body { white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow-y: auto; color: var(--text-muted); font-size: 0.9em; }
+/* 待办清单面板（输入框上方）：默认折叠，摘要给出三态计数 */
+.dsh-todos { padding: 0 8px; }
+.dsh-todos-panel { border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 2px 8px; font-size: 0.85em; }
+.dsh-todos-panel summary { cursor: pointer; color: var(--text-muted); }
+.dsh-todos-list { margin: 4px 0; padding-left: 0; list-style: none; }
+.dsh-todo-item { display: flex; gap: 6px; align-items: flex-start; margin: 2px 0; }
+.dsh-todo-glyph { flex: none; color: var(--text-muted); }
+.dsh-todo-pending { color: var(--text-normal); }
+.dsh-todo-in_progress { color: var(--text-accent); }
+.dsh-todo-completed { color: var(--text-muted); text-decoration: line-through; }
+/* 底部状态行（上下文占用 / 输出用量）：无数据时加 dsh-hidden，不占位 */
+.dsh-chat-metrics { font-size: 0.8em; color: var(--text-muted); padding: 2px 8px 0; }
+
+/* 模型 / 推理档位选择区（TASK-030 项 1）：目录未加载或没有会话时整行 dsh-hidden */
+.dsh-model-row { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+.dsh-model-select { flex: 1 1 auto; min-width: 0; }
+.dsh-model-effort { flex: 0 1 auto; max-width: 45%; }
+
+/* 输入框下方的附件条（TASK-030 项 3）：已选图片 chip + 📎 按钮 */
+.dsh-attach-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 0 8px 6px; }
+.dsh-attach-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.dsh-attach-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 0.8em; color: var(--text-muted); border: 1px solid var(--background-modifier-border); border-radius: 10px; padding: 1px 6px; }
+.dsh-attach-remove { font-size: 0.9em; line-height: 1; padding: 0 2px; cursor: pointer; }
+.dsh-attach-add { font-size: 0.85em; }
+
+/* 目标面板（TASK-030 项 4）：无目标时加 dsh-hidden，不占位 */
+.dsh-goal { padding: 0 8px 4px; }
+.dsh-goal-bar { border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 4px 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.dsh-goal-summary { flex: 1 1 auto; font-size: 0.85em; }
+.dsh-goal-active { color: var(--text-normal); }
+.dsh-goal-paused { color: var(--text-muted); }
+.dsh-goal-blocked { color: var(--text-error); }
+.dsh-goal-complete { color: var(--text-muted); text-decoration: line-through; }
+.dsh-goal-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+.dsh-goal-actions button { font-size: 0.8em; }
+.dsh-goal-input-row { display: flex; gap: 6px; margin-top: 4px; }
+.dsh-goal-input-row input { flex: 1 1 auto; min-width: 0; }
+
+/* 用户消息里的图片计数标记（图片本体不在事件里，只提示该条带图） */
+.dsh-msg-images { font-size: 0.8em; color: var(--text-muted); margin-bottom: 2px; }

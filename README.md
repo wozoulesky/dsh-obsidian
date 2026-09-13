@@ -15,7 +15,15 @@ Embed your locally running [DeepSeek Harness (DSH)](https://www.npmjs.com/packag
 - **Chat sidebar** — streamed responses, tool-call cards, approval/question popups (retryable), session switching and creation, "load older" pagination, and automatic re-sync after reconnects
 - **Inline edit** — select text + hotkey → instruction → word-level diff preview → apply (editor selection is re-validated before applying; large selections degrade to a plain confirm dialog)
 - **@mentions** — type `@` to pick vault files (`@file:path`, content injected) or folders (`@folder:path`, directory tree injected), with truncation and missing-file notices
-- **Slash commands & plan mode** — `/plan`, `/compact`, `/feedback`, `/goal` with autocomplete; `Shift+Tab` toggles plan mode with a status banner
+- **Slash commands & plan mode** — commands come from the running DSH (so the list always matches your install), plus the local `/clear`; `Shift+Tab` toggles plan mode with a status banner
+- **Model & reasoning effort** — pick provider/model and reasoning effort from the panel; the list is grouped from your DSH model catalog
+- **Thinking process** — collapsible reasoning block above each reply, streamed live and folded once the turn completes
+- **Context usage** — a status line showing projected tokens against the context window, plus output tokens
+- **Todo list** — the agent's live todo list with pending / in-progress / completed states
+- **Image attachments** — attach images from your vault to a prompt; the agent reads them directly
+- **Goal panel** — view and control a long-running goal (create / pause / resume / complete / clear)
+
+Long sessions stay bounded: when DSH compacts history, replaced messages collapse into the summary instead of piling up.
 
 ## Screenshots
 

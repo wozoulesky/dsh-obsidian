@@ -77,7 +77,15 @@ export default class DshPlugin extends Plugin {
         },
       });
       const approvals = new ApprovalCenter(client);
-      const manager = new SessionManager({ client, store, vaultPath: this.vaultPath(), settings: this.settings, t: (key, params) => i18n.t(key, params) });
+      const manager = new SessionManager({
+        client,
+        store,
+        vaultPath: this.vaultPath(),
+        settings: this.settings,
+        t: (key, params) => i18n.t(key, params),
+        // 服务端重启会丢掉进行中的回合（从未落库），重连对账时半截气泡被摘除——告知一次，避免文字静默消失
+        onInterruptedTurnDropped: () => new Notice(i18n.t("chat.interruptedTurnDropped")),
+      });
       this.globalStreams = new GlobalStreams(client, store, approvals);
       runtime = {
         plugin: this,
@@ -153,5 +161,9 @@ export default class DshPlugin extends Plugin {
   onunload(): void {
     this.globalStreams?.stop();
     this.runtime?.mux?.stop();
+    // 设置面板的逐键写入是防抖的（见 DshSettings.saveDebounced）：卸载时若仍有挂起写入，
+    // 必须立刻发起落盘，否则用户最后改的那次设置会随插件一起丢掉。
+    // 注意：saveData 是异步的，Obsidian 不会等它完成——这里只能把写请求尽早发出（<300ms 的窗口）。
+    void this.settings.flush().catch((err) => console.error("[dsh-bridge] 卸载时设置落盘失败:", err));
   }
 }

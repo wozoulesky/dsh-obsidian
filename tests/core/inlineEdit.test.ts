@@ -15,15 +15,15 @@ describe("renderInlineEditPrompt", () => {
 describe("extractLastAssistantText", () => {
   it("提取最后一条已终结的 assistant 文本", () => {
     const view = createSessionView("s");
-    view.nodes.push({ kind: "user", id: "u", text: "x", sourceKind: "user", seq: 1 });
-    view.nodes.push({ kind: "assistant", id: "a1", text: "```markdown\n结果A\n```", reasoning: "", toolCards: [], streaming: false, seq: 2 });
-    view.nodes.push({ kind: "assistant", id: "a2", text: "结果B", reasoning: "", toolCards: [], streaming: false, seq: 3 });
+    view.nodes.push({ kind: "user", id: "u", text: "x", sourceKind: "user", imageCount: 0, seq: 1, rev: 0 });
+    view.nodes.push({ kind: "assistant", id: "a1", text: "```markdown\n结果A\n```", reasoning: "", toolCards: [], streaming: false, seq: 2, rev: 0 });
+    view.nodes.push({ kind: "assistant", id: "a2", text: "结果B", reasoning: "", toolCards: [], streaming: false, seq: 3, rev: 0 });
     expect(extractLastAssistantText(view, 0)).toBe("结果B");
   });
 
   it("去掉 markdown 代码围栏", () => {
     const view = createSessionView("s");
-    view.nodes.push({ kind: "assistant", id: "a", text: "```\n纯文本\n```", reasoning: "", toolCards: [], streaming: false, seq: 1 });
+    view.nodes.push({ kind: "assistant", id: "a", text: "```\n纯文本\n```", reasoning: "", toolCards: [], streaming: false, seq: 1, rev: 0 });
     expect(extractLastAssistantText(view, 0)).toBe("纯文本");
   });
 
@@ -57,16 +57,16 @@ describe("classifyTurnState", () => {
     view.lastSeq = 6;
     view.lastTurnStartSeq = 2; // 旧回合的 start，早于 sinceSeq
     view.lastTurnEndSeq = 6; // 旧回合已结束
-    view.nodes.push({ kind: "assistant", id: "a5", text: "旧结果", reasoning: "", toolCards: [], streaming: false, seq: 5 });
+    view.nodes.push({ kind: "assistant", id: "a5", text: "旧结果", reasoning: "", toolCards: [], streaming: false, seq: 5, rev: 0 });
     expect(classifyTurnState(view, 2).kind).toBe("pending");
   });
 
   it("本轮错误节点立即判 error，不回落旧文本", () => {
     const view = createSessionView("s");
-    view.nodes.push({ kind: "assistant", id: "a0", text: "旧结果", reasoning: "", toolCards: [], streaming: false, seq: 1 });
+    view.nodes.push({ kind: "assistant", id: "a0", text: "旧结果", reasoning: "", toolCards: [], streaming: false, seq: 1, rev: 0 });
     view.lastSeq = 3;
     view.lastTurnStartSeq = 2; // 本回合已开始
-    view.nodes.push({ kind: "error", id: "e2", text: "回合错误：模型挂了", seq: 3 });
+    view.nodes.push({ kind: "error", id: "e2", text: "回合错误：模型挂了", seq: 3, rev: 0 });
     const state = classifyTurnState(view, 1);
     expect(state.kind).toBe("error");
   });
@@ -77,17 +77,17 @@ describe("classifyTurnState", () => {
     view.lastTurnStartSeq = 5;
     view.lastTurnEndSeq = 6;
     // 旧回合残留：seq 3 > sinceSeq 2，但早于本回合 start（5）
-    view.nodes.push({ kind: "assistant", id: "a3", text: "旧回合残留", reasoning: "", toolCards: [], streaming: false, seq: 3 });
+    view.nodes.push({ kind: "assistant", id: "a3", text: "旧回合残留", reasoning: "", toolCards: [], streaming: false, seq: 3, rev: 0 });
     // 本回合结束但无文本 → error（而不是拿旧残留判 ready）
     expect(classifyTurnState(view, 2).kind).toBe("error");
   });
 
   it("本轮已终结 assistant 判 ready，旧 assistant 不算", () => {
     const view = createSessionView("s");
-    view.nodes.push({ kind: "assistant", id: "a0", text: "旧结果", reasoning: "", toolCards: [], streaming: false, seq: 1 });
+    view.nodes.push({ kind: "assistant", id: "a0", text: "旧结果", reasoning: "", toolCards: [], streaming: false, seq: 1, rev: 0 });
     view.lastSeq = 4;
     view.lastTurnStartSeq = 3;
-    view.nodes.push({ kind: "assistant", id: "a2", text: "新结果", reasoning: "", toolCards: [], streaming: false, seq: 4 });
+    view.nodes.push({ kind: "assistant", id: "a2", text: "新结果", reasoning: "", toolCards: [], streaming: false, seq: 4, rev: 0 });
     expect(classifyTurnState(view, 2).kind).toBe("ready");
     // 旧节点不越过 sinceSeq：无新 assistant 时回落 pending 而非旧文本
     expect(classifyTurnState(view, 5).kind).toBe("pending");
@@ -95,7 +95,7 @@ describe("classifyTurnState", () => {
 
   it("extractLastAssistantText 不越过 sinceSeq", () => {
     const view = createSessionView("s");
-    view.nodes.push({ kind: "assistant", id: "a0", text: "旧结果", reasoning: "", toolCards: [], streaming: false, seq: 1 });
+    view.nodes.push({ kind: "assistant", id: "a0", text: "旧结果", reasoning: "", toolCards: [], streaming: false, seq: 1, rev: 0 });
     expect(() => extractLastAssistantText(view, 2)).toThrow();
   });
 

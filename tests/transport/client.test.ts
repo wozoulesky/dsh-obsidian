@@ -161,6 +161,101 @@ beforeAll(async () => {
       } else if (url === "/api/session/cancel") {
         sendJson(res, 200, { type: "server-response", rpcId: b?.rpcId, result: { ok: true, value: { accepted: true } } });
       }
+      // ---- TASK-030 新增端点（真机 args 形状见 tmp/probe-task030.notes.md） ----
+      else if (url === "/api/session/modelCatalog") {
+        const args = b?.payload?.args as Record<string, unknown> | undefined;
+        // 描述符**没有参数**：任何多余键都是 arguments-invalid（真机反例实测）
+        if (args === undefined || Object.keys(args).length > 0) {
+          sendJson(res, 200, {
+            type: "server-response",
+            rpcId: b?.rpcId,
+            result: { ok: false, error: { code: "gateway/arguments-invalid", message: `unexpected ${Object.keys(args ?? {}).join(",")}` } },
+          });
+          return;
+        }
+        sendJson(res, 200, {
+          type: "server-response",
+          rpcId: b?.rpcId,
+          result: {
+            ok: true,
+            value: {
+              default: { provider: "p1", model: "m1", reasoningEffort: "high" },
+              routableProviders: ["p1"],
+              groups: [{ id: "p1", name: "Provider 1", models: [{ id: "m1", name: "Model 1", reasoning: { efforts: [{ id: "high", name: "High" }], defaultEffort: "high" } }] }],
+              failures: [],
+            },
+          },
+        });
+      } else if (url === "/api/session/selectModel") {
+        const args = b?.payload?.args as { request?: { sessionId?: string; provider?: string; model?: string; reasoningEffort?: string } } | undefined;
+        if (typeof args?.request?.sessionId !== "string" || typeof args.request.provider !== "string" || typeof args.request.model !== "string") {
+          sendJson(res, 200, {
+            type: "server-response",
+            rpcId: b?.rpcId,
+            result: { ok: false, error: { code: "gateway/arguments-invalid", message: "request 非法" } },
+          });
+          return;
+        }
+        sendJson(res, 200, {
+          type: "server-response",
+          rpcId: b?.rpcId,
+          result: { ok: true, value: { selected: { provider: args.request.provider, model: args.request.model, ...(args.request.reasoningEffort === undefined ? {} : { reasoningEffort: args.request.reasoningEffort }) } } },
+        });
+      } else if (url === "/api/session/attachment") {
+        const args = b?.payload?.args as { request?: { sessionId?: string; attachmentId?: string } } | undefined;
+        if (typeof args?.request?.attachmentId !== "string") {
+          sendJson(res, 200, {
+            type: "server-response",
+            rpcId: b?.rpcId,
+            result: { ok: false, error: { code: "session/attachment-invalid", message: "Image is not referenced by this session.", details: { reason: "ATTACHMENT_NOT_REFERENCED" } } },
+          });
+          return;
+        }
+        sendJson(res, 200, { type: "server-response", rpcId: b?.rpcId, result: { ok: true, value: { attachment: { id: args.request.attachmentId }, data: "QUJD" } } });
+      } else if (url === "/api/commands/list") {
+        const args = b?.payload?.args as Record<string, unknown> | undefined;
+        // 平铺 {agentId}：包裹或漏字段一律 arguments-invalid（真机反例实测）
+        if (typeof args?.agentId !== "string" || "request" in (args ?? {})) {
+          sendJson(res, 200, {
+            type: "server-response",
+            rpcId: b?.rpcId,
+            result: { ok: false, error: { code: "gateway/arguments-invalid", message: `missing "agentId"; unexpected ${Object.keys(args ?? {}).join(",")}` } },
+          });
+          return;
+        }
+        sendJson(res, 200, {
+          type: "server-response",
+          rpcId: b?.rpcId,
+          result: { ok: true, value: [{ name: "compact", description: "Compact older conversation history" }, { name: "goal", description: "set or view the goal", input: { hint: "[<objective>]", attachments: true } }] },
+        });
+      } else if (url === "/api/commands/execute") {
+        const args = b?.payload?.args as Record<string, unknown> | undefined;
+        if (typeof args?.agentId !== "string" || typeof args.line !== "string" || !Array.isArray(args.submittedAttachments) || "request" in (args ?? {})) {
+          sendJson(res, 200, {
+            type: "server-response",
+            rpcId: b?.rpcId,
+            result: { ok: false, error: { code: "gateway/arguments-invalid", message: 'missing "agentId", "line", "submittedAttachments"' } },
+          });
+          return;
+        }
+        // 未注册命令 → host 返回 undefined（真机实测）；/goal 命中 → 返回执行结果
+        const value = args.line === "/goal" ? { commandId: "cmd-1", result: { kind: "error", text: "/goal 需要参数" } } : undefined;
+        sendJson(res, 200, { type: "server-response", rpcId: b?.rpcId, result: { ok: true, ...(value === undefined ? {} : { value }) } });
+      } else if (url === "/api/goals/get") {
+        const args = b?.payload?.args as Record<string, unknown> | undefined;
+        if (typeof args?.agentId !== "string" || "request" in (args ?? {})) {
+          sendJson(res, 200, { type: "server-response", rpcId: b?.rpcId, result: { ok: false, error: { code: "gateway/arguments-invalid", message: 'missing "agentId"' } } });
+          return;
+        }
+        sendJson(res, 200, { type: "server-response", rpcId: b?.rpcId, result: { ok: true } }); // 无目标：value 缺省
+      } else if (url === "/api/goals/create" || url === "/api/goals/edit" || url === "/api/goals/pause" || url === "/api/goals/resume" || url === "/api/goals/complete" || url === "/api/goals/clear") {
+        const args = b?.payload?.args as Record<string, unknown> | undefined;
+        if (typeof args?.agentId !== "string" || "request" in (args ?? {})) {
+          sendJson(res, 200, { type: "server-response", rpcId: b?.rpcId, result: { ok: false, error: { code: "gateway/arguments-invalid", message: 'missing "agentId"' } } });
+          return;
+        }
+        sendJson(res, 200, { type: "server-response", rpcId: b?.rpcId, result: { ok: true, value: { id: "g1", revision: 2, objective: "完成 X", phase: "active", maxGoalRounds: 12, roundsStarted: 0, createdAt: 1, updatedAt: 2, activation: "armed" } } });
+      }
       // ---- $events/result（waterfall 应答） ----
       else if (url === "/api/$events/result") {
         sendJson(res, 200, { type: "server-response", rpcId: b?.rpcId, result: { ok: true, value: undefined } });
@@ -274,6 +369,113 @@ describe("DshClient 新契约（端点斜杠 + args 包装 + Cookie）", () => {
     await client.list();
     const seen = lastObserved();
     expect(seen.headers.cookie).toBe(FIXED_COOKIE);
+  });
+
+  /* ---- TASK-030 新增端点：args 形状逐字对齐真机探测（tmp/probe-task030.notes.md） ---- */
+
+  it("modelCatalog 发送空 args（描述符无参数；带 request 会被网关拒绝）", async () => {
+    const client = makeClient();
+    const res = await client.modelCatalog();
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.value.default).toEqual({ provider: "p1", model: "m1", reasoningEffort: "high" });
+      expect(res.value.groups[0].models[0].reasoning?.efforts.map((e) => e.id)).toEqual(["high"]);
+    }
+    const seen = lastObserved();
+    expect(seen.url).toBe("/api/session/modelCatalog");
+    expect((seen.body as { payload: unknown }).payload).toEqual({ args: {} });
+  });
+
+  it("selectModel 发送 {args:{request:{sessionId,provider,model,reasoningEffort?}}}（无档位时不下发该键）", async () => {
+    const client = makeClient();
+    await client.selectModel({ sessionId: "s1", provider: "p1", model: "m1" });
+    expect(lastObserved().url).toBe("/api/session/selectModel");
+    expect((lastObserved().body as { payload: unknown }).payload).toEqual({
+      args: { request: { sessionId: "s1", provider: "p1", model: "m1" } },
+    });
+
+    const res = await client.selectModel({ sessionId: "s1", provider: "p1", model: "m1", reasoningEffort: "max" });
+    expect((lastObserved().body as { payload: unknown }).payload).toEqual({
+      args: { request: { sessionId: "s1", provider: "p1", model: "m1", reasoningEffort: "max" } },
+    });
+    expect(res.ok && res.value.selected.reasoningEffort).toBe("max");
+  });
+
+  it("attachment 发送 {args:{request:{sessionId,attachmentId}}} 并透传领域错误", async () => {
+    const client = makeClient();
+    const ok = await client.attachment({ sessionId: "s1", attachmentId: "att-1" });
+    expect(lastObserved().url).toBe("/api/session/attachment");
+    expect((lastObserved().body as { payload: unknown }).payload).toEqual({
+      args: { request: { sessionId: "s1", attachmentId: "att-1" } },
+    });
+    expect(ok.ok && ok.value.data).toBe("QUJD");
+  });
+
+  it("listCommands 的 args 是**平铺** {agentId}（不包裹 request）", async () => {
+    const client = makeClient();
+    const res = await client.listCommands("sess-1");
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.value.map((c) => c.name)).toEqual(["compact", "goal"]);
+      expect(res.value[1].input?.attachments).toBe(true);
+    }
+    const seen = lastObserved();
+    expect(seen.url).toBe("/api/commands/list");
+    expect((seen.body as { payload: unknown }).payload).toEqual({ args: { agentId: "sess-1" } });
+  });
+
+  it("executeCommand 的 args 平铺且三键齐全；未命中命令时 value 缺省（undefined）", async () => {
+    const client = makeClient();
+    const miss = await client.executeCommand("sess-1", "/__no_such__", []);
+    const seen = lastObserved();
+    expect(seen.url).toBe("/api/commands/execute");
+    expect((seen.body as { payload: unknown }).payload).toEqual({
+      args: { agentId: "sess-1", line: "/__no_such__", submittedAttachments: [] },
+    });
+    expect(miss.ok && miss.value).toBeUndefined(); // 回退为普通 prompt 的信号
+
+    const hit = await client.executeCommand("sess-1", "/goal", [{ type: "image", mediaType: "image/png", data: "AAAA", name: "a.png" }]);
+    expect((lastObserved().body as { payload: unknown }).payload).toEqual({
+      args: { agentId: "sess-1", line: "/goal", submittedAttachments: [{ type: "image", mediaType: "image/png", data: "AAAA", name: "a.png" }] },
+    });
+    expect(hit.ok && hit.value?.result.kind).toBe("error");
+  });
+
+  it("goals/* 参数平铺：get 只带 agentId；create 带 request；pause/resume/complete/clear 带 ref", async () => {
+    const client = makeClient();
+    await client.goalGet("sess-1");
+    expect(lastObserved().url).toBe("/api/goals/get");
+    expect((lastObserved().body as { payload: unknown }).payload).toEqual({ args: { agentId: "sess-1" } });
+
+    await client.goalCreate("sess-1", { objective: "完成 TASK-030" });
+    expect(lastObserved().url).toBe("/api/goals/create");
+    expect((lastObserved().body as { payload: unknown }).payload).toEqual({
+      args: { agentId: "sess-1", request: { objective: "完成 TASK-030" } },
+    });
+
+    const ref = { id: "g1", revision: 3 };
+    await client.goalEdit("sess-1", ref, { objective: "改目标" });
+    expect((lastObserved().body as { payload: unknown }).payload).toEqual({
+      args: { agentId: "sess-1", ref, request: { objective: "改目标" } },
+    });
+
+    for (const [method, call] of [
+      ["pause", () => client.goalPause("sess-1", ref)],
+      ["resume", () => client.goalResume("sess-1", ref)],
+      ["complete", () => client.goalComplete("sess-1", ref)],
+      ["clear", () => client.goalClear("sess-1", ref)],
+    ] as const) {
+      await call();
+      expect(lastObserved().url).toBe(`/api/goals/${method}`);
+      expect((lastObserved().body as { payload: unknown }).payload).toEqual({ args: { agentId: "sess-1", ref } });
+    }
+  });
+
+  it("goals/get 无目标时 value 缺省 → ok 且值为 undefined（不是错误）", async () => {
+    const client = makeClient();
+    const res = await client.goalGet("sess-1");
+    expect(res.ok).toBe(true);
+    expect(res.ok && res.value).toBeUndefined();
   });
 
   it("DshCookieAuth 注入路径：请求携带自签 cookie（dsh-auth- 前缀 + v1.<body>.<sig> 三段）", async () => {

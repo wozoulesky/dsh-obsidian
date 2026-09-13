@@ -47,7 +47,7 @@ export class DshSettingTab extends PluginSettingTab {
             b.setButtonText(t("settings.resetButton")).onClick(async () => {
               try {
                 s.values.inlineEditSessionId = "";
-                await s.save();
+                await s.save(); // 立即落盘：重置必须马上生效，不能进防抖队列
                 new Notice(t("settings.resetDone"));
               } catch (err) {
                 new Notice(t("settings.resetFailed", { message: err instanceof Error ? err.message : String(err) }));
@@ -89,7 +89,18 @@ export class DshSettingTab extends PluginSettingTab {
     } else {
       values[key] = typeof value === "string" ? value.trim() : value;
     }
-    void this.plugin.settings.save();
+    // 逐键输入走防抖：每敲一个字符写一次 data.json 是纯浪费（见 DshSettings.saveDebounced）。
+    // 重置内联会话等「写完即生效」的路径仍用 save()，见下方按钮与声明式 render。
+    this.plugin.settings.saveDebounced();
+  }
+
+  /**
+   * 面板关闭：先走框架自己的隐藏逻辑，再把挂起的防抖写入落盘——
+   * 否则「改完最后一项就直接关设置」会丢掉那次改动（防抖窗口内的写入还没发出去）。
+   */
+  hide(): void {
+    super.hide();
+    void this.plugin.settings.flush().catch((err) => console.error("[dsh-bridge] 设置落盘失败:", err));
   }
 
   /** 1.13 以下版本回退到命令式 UI（声明式定义非空时框架不再调用本方法）。 */
@@ -102,7 +113,7 @@ export class DshSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName(t("settings.dshUrlName")).setDesc(t("settings.dshUrlDesc")).addText((text) =>
       text.setValue(s.values.dshUrl).onChange(async (v) => {
         s.values.dshUrl = v.trim();
-        await s.save();
+        s.saveDebounced();
       })
     );
 
@@ -111,7 +122,7 @@ export class DshSettingTab extends PluginSettingTab {
         const n = Number(v);
         if (Number.isFinite(n) && n > 0) {
           s.values.mentionMaxChars = Math.floor(n);
-          await s.save();
+          s.saveDebounced();
         }
       })
     );
@@ -121,7 +132,7 @@ export class DshSettingTab extends PluginSettingTab {
         const n = Number(v);
         if (Number.isFinite(n) && n > 0) {
           s.values.inlineEditTimeoutSec = Math.floor(n);
-          await s.save();
+          s.saveDebounced();
         }
       })
     );
@@ -131,7 +142,7 @@ export class DshSettingTab extends PluginSettingTab {
         const n = Number(v);
         if (Number.isFinite(n) && n > 0) {
           s.values.historyPageSize = Math.floor(n);
-          await s.save();
+          s.saveDebounced();
         }
       })
     );
@@ -140,7 +151,7 @@ export class DshSettingTab extends PluginSettingTab {
       b.setButtonText(t("settings.resetButton")).onClick(async () => {
         try {
           s.values.inlineEditSessionId = "";
-          await s.save();
+          await s.save(); // 立即落盘：重置必须马上生效，不能进防抖队列
           new Notice(t("settings.resetDone"));
         } catch (err) {
           new Notice(t("settings.resetFailed", { message: err instanceof Error ? err.message : String(err) }));

@@ -18,17 +18,30 @@ import {
   type CancelPayload,
   type CancelResult,
   type ClientRequest,
+  type CommandDescriptor,
+  type CommandExecution,
+  type CommandSubmitAttachment,
+  type CreateGoalRequest,
+  type CreateGoalResult,
+  type EditGoalRequest,
+  type GoalRef,
+  type GoalView,
+  type ModelCatalog,
   type PromptPayload,
   type PromptRequestInput,
   type PromptResult,
   type RemoteEventOutcome,
   type RemoteEventResultArgs,
   type RpcResult,
+  type SessionAttachmentRequest,
+  type SessionAttachmentValue,
   type SessionCreatePayload,
   type SessionCreateResult,
   type SessionListResult,
   type SessionPage,
   type SessionPageRequest,
+  type SessionSelectModelRequest,
+  type SessionSelectModelValue,
 } from "./types";
 import { DshAuthError, type DshCookieAuth } from "./auth";
 import { RemoteMuxTransport, type RemoteMuxTransportOptions } from "./muxStream";
@@ -235,5 +248,81 @@ export class DshClient {
 
   cancel(payload: CancelPayload): Promise<RpcResult<CancelResult>> {
     return this.call<CancelResult>("session/cancel", { request: payload });
+  }
+
+  /* ---- TASK-030 新增端点 ---- */
+
+  /**
+   * 模型目录（TASK-030 项 1）。
+   * 注意：`session/modelCatalog` 的线上描述符**没有参数**，args 必须是 `{}`——
+   * 传 `{request:{}}` 会被网关以 `gateway/arguments-invalid` 拒绝（真机实测见 tmp/probe-task030.notes.md）。
+   */
+  modelCatalog(): Promise<RpcResult<ModelCatalog>> {
+    return this.call<ModelCatalog>("session/modelCatalog", {});
+  }
+
+  /** 切换会话模型/推理档位：args `{request:{sessionId,provider,model,reasoningEffort?}}`。 */
+  selectModel(payload: SessionSelectModelRequest): Promise<RpcResult<SessionSelectModelValue>> {
+    return this.call<SessionSelectModelValue>("session/selectModel", { request: payload });
+  }
+
+  /** 读取本会话已引用的图片（durable attachment）：args `{request:{sessionId,attachmentId}}`。 */
+  attachment(payload: SessionAttachmentRequest): Promise<RpcResult<SessionAttachmentValue>> {
+    return this.call<SessionAttachmentValue>("session/attachment", { request: payload });
+  }
+
+  /**
+   * 命令清单（TASK-030 项 2）。
+   * **参数平铺**：args `{agentId}`（agentId 即 sessionId）——不是 `{request:{...}}`。
+   */
+  listCommands(agentId: string): Promise<RpcResult<CommandDescriptor[]>> {
+    return this.call<CommandDescriptor[]>("commands/list", { agentId });
+  }
+
+  /**
+   * 执行一条斜杠命令（不经模型）。
+   * **参数平铺**：args `{agentId,line,submittedAttachments}`，三者皆必填（缺一即 arguments-invalid）。
+   * 返回 `undefined` 表示词法不成立或命令名未注册（host 不写 session 日志）——调用方应回退为普通 prompt。
+   */
+  executeCommand(
+    agentId: string,
+    line: string,
+    submittedAttachments: CommandSubmitAttachment[]
+  ): Promise<RpcResult<CommandExecution | undefined>> {
+    return this.call<CommandExecution | undefined>("commands/execute", { agentId, line, submittedAttachments });
+  }
+
+  /* ---- goals/*（TASK-030 项 4）：参数全部平铺，首参恒为 agentId ---- */
+
+  /** 读当前目标（含进程内 activation）；无目标时 value 为 undefined。 */
+  goalGet(agentId: string): Promise<RpcResult<GoalView | undefined>> {
+    return this.call<GoalView | undefined>("goals/get", { agentId });
+  }
+
+  /** 新建目标：args `{agentId, request:{objective,maxGoalRounds?}}`。 */
+  goalCreate(agentId: string, request: CreateGoalRequest): Promise<RpcResult<CreateGoalResult>> {
+    return this.call<CreateGoalResult>("goals/create", { agentId, request });
+  }
+
+  /** 修改目标：args `{agentId, ref, request}`（ref 为 CAS 身份 {id,revision}）。 */
+  goalEdit(agentId: string, ref: GoalRef, request: EditGoalRequest): Promise<RpcResult<GoalView>> {
+    return this.call<GoalView>("goals/edit", { agentId, ref, request });
+  }
+
+  goalPause(agentId: string, ref: GoalRef): Promise<RpcResult<GoalView>> {
+    return this.call<GoalView>("goals/pause", { agentId, ref });
+  }
+
+  goalResume(agentId: string, ref: GoalRef): Promise<RpcResult<GoalView>> {
+    return this.call<GoalView>("goals/resume", { agentId, ref });
+  }
+
+  goalComplete(agentId: string, ref: GoalRef): Promise<RpcResult<GoalView>> {
+    return this.call<GoalView>("goals/complete", { agentId, ref });
+  }
+
+  /** 清除目标：返回被清除的 ref（投影随后变为 null）。 */
+  goalClear(agentId: string, ref: GoalRef): Promise<RpcResult<GoalRef>> {
+    return this.call<GoalRef>("goals/clear", { agentId, ref });
   }
 }

@@ -1,6 +1,8 @@
-import { createSessionView, foldEvent, type SessionView } from "./eventFold";
-import type { ProjectionsBlock, SessionControlFrame, SessionEvent, SessionFollowFrame } from "../transport/types";
+import { createSessionView, foldAssistantStreamFrame, foldEvent, narrowContextPressure, narrowTodos, narrowTokenUsage, type SessionView } from "./eventFold";
+import { narrowGoal, narrowImageLimits, narrowModelSelection } from "./sessionProjections";
+import type { AssistantStreamFrame, ProjectionsBlock, SessionControlFrame, SessionEvent, SessionFollowFrame } from "../transport/types";
 import { expandHistoryRecords } from "../transport/chunkRows";
+import { expandAssistantStream } from "../transport/assistantStream";
 
 interface ProjectionCell {
   value: unknown;
@@ -42,7 +44,15 @@ export class SessionStore {
     return this.views.get(sessionId);
   }
 
-  /** 应用一个投影单元（higher-seq-wins）；返回 true 表示视图可见状态发生了变化（调用方才需要 notify）。 */
+  /**
+   * 应用一个投影单元（higher-seq-wins）；返回 true 表示视图可见状态发生了变化（调用方才需要 notify）。
+   *
+   * 消费的投影键（TASK-029/030）：`title` / `plan` / `tokenUsage` / `contextPressure` / `todos` /
+   * `modelSelection` / `imageLimits` / `goal`。
+   * 其余键（token-meter 的 contextBreakdown、inbox、subagent* 等）仍静默忽略——插件不展示即不消费。
+   * 每个新键都先**收窄**再写入：畸形负载一律 return false（视图保持上一个可信值），
+   * 于是"字段有值"恒等于"数据可信"，UI 无需再做防御（仍是可选字段）。
+   */
   applyProjection(sessionId: string, key: string, value: unknown, seq: number): boolean {
     const cells = this.projections.get(sessionId) ?? new Map<string, ProjectionCell>();
     const prev = cells.get(key);
@@ -63,17 +73,86 @@ export class SessionStore {
       view.plan = { active: plan.active === true, pending: plan.pending === true };
       return true;
     }
+    if (key === "tokenUsage") {
+      const usage = narrowTokenUsage(value);
+      if (!usage) return false;
+      view.usage = usage;
+      return true;
+    }
+    if (key === "contextPressure") {
+      const pressure = narrowContextPressure(value);
+      if (!pressure) return false; // 真机会话确实会下发 `{}`（无样本）——不写入即不渲染
+      view.contextPressure = pressure;
+      return true;
+    }
+    if (key === "todos") {
+      const todos = narrowTodos(value);
+      if (todos === undefined) return false;
+      view.todos = todos; // null=已清空，与事件路径（turn/start 清零）语义一致
+      return true;
+    }
+    if (key === "modelSelection") {
+      const selection = narrowModelSelection(value);
+      if (selection === undefined) return false;
+      view.modelSelection = selection;
+      return true;
+    }
+    if (key === "imageLimits") {
+      const limits = narrowImageLimits(value);
+      if (limits === undefined) return false;
+      view.imageLimits = limits;
+      return true;
+    }
+    if (key === "goal") {
+      const goal = narrowGoal(value);
+      if (goal === undefined) return false;
+      view.goal = goal; // null=无目标（合法值，UI 隐藏目标条）
+      return true;
+    }
     return false;
   }
 
   /**
    * 播种 follow 快照（批 4）：展开 chunkrow → 折叠进视图；snapshot.projections 逐键播种
-   * （title/plan 等投影以 asOfSeq 为水位，higher-seq-wins）。
+   * （title/plan/tokenUsage/contextPressure/todos 以 asOfSeq 为水位，higher-seq-wins）。
+   *
+   * 顺序要紧：先折叠事件、再播种投影——投影是 asOfSeq 处的**权威折叠结果**，
+   * 因此快照里那条 `turn/start`（事件路径会清空 todos）不会盖掉投影里的当前清单。
    */
   applyFollowSnapshot(sessionId: string, frame: Extract<SessionFollowFrame, { type: "snapshot" }>): void {
     const view = this.ensureView(sessionId);
     for (const event of expandHistoryRecords(frame.records)) foldEvent(view, event);
     this.applyProjectionsBlock(sessionId, frame.projections);
+    this.seedAssistantStream(view, frame);
+    this.notify();
+  }
+
+  /**
+   * 播种快照里的在飞 attempt（0.1.5 `assistantStream.activeAttempt`）：断线重连时正在流式的
+   * 文本被恢复，而不是等 durable assistant/message 到达才出现。
+   */
+  private seedAssistantStream(view: SessionView, frame: Extract<SessionFollowFrame, { type: "snapshot" }>): void {
+    const attempt = frame.assistantStream?.activeAttempt;
+    if (!attempt) return;
+    view.running = true;
+    foldAssistantStreamFrame(view, {
+      type: "start",
+      attemptId: attempt.attemptId,
+      revision: frame.assistantStream?.revision ?? 0,
+      startedAfterSeq: attempt.startedAfterSeq,
+      turn: attempt.turn,
+      step: attempt.step,
+    });
+    for (const chunk of expandAssistantStream(attempt.stream)) {
+      foldAssistantStreamFrame(view, { type: "chunk", attemptId: attempt.attemptId, revision: 0, index: attempt.nextIndex, time: 0, chunk });
+    }
+  }
+
+  /** follow 流的瞬态 assistant 增量帧（0.1.5）：仅折叠进已存在的视图（与 applyFollowEvent 同语义）。 */
+  applyFollowAssistantStream(sessionId: string, frame: AssistantStreamFrame): void {
+    const view = this.views.get(sessionId);
+    if (!view) return;
+    foldAssistantStreamFrame(view, frame);
     this.notify();
   }
 
@@ -151,6 +230,15 @@ export class SessionStore {
       rebuilt.title = current.title ?? rebuilt.title;
       rebuilt.plan = current.plan.active || current.plan.pending ? current.plan : rebuilt.plan;
       rebuilt.queueItems = current.queueItems;
+      // 投影态一律以尾页视图为准（前插的是更早的事件，旧页可能折叠出过期的 todo/write）。
+      // 仅在新字段**有值**时覆盖：undefined 表示"从未收到该投影"，此时保留旧页折叠结果更接近真相。
+      if (current.usage !== undefined) rebuilt.usage = current.usage;
+      if (current.contextPressure !== undefined) rebuilt.contextPressure = current.contextPressure;
+      if (current.todos !== undefined) rebuilt.todos = current.todos;
+      // 注意 goal 的 `null`（无目标）也是明确语义，故判定用 !== undefined 而非真值判断
+      if (current.modelSelection !== undefined) rebuilt.modelSelection = current.modelSelection;
+      if (current.imageLimits !== undefined) rebuilt.imageLimits = current.imageLimits;
+      if (current.goal !== undefined) rebuilt.goal = current.goal;
     }
     this.views.set(sessionId, rebuilt);
     this.notify();
