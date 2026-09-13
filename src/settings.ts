@@ -6,6 +6,13 @@ export interface DshPluginSettings {
   inlineEditTimeoutSec: number;
   historyPageSize: number;
   inlineEditSessionId: string;
+  /**
+   * DSH 凭据文件的完整路径覆盖（留空 = 自动：`$DSH_HOME/.credentials.yaml`，取不到则 `~/.dsh/.credentials.yaml`）。
+   *
+   * 用于 DSH home 非默认且 `$DSH_HOME` 不可达的场景——Obsidian 以 GUI 方式启动时通常拿不到该环境变量，
+   * 此时用户在这里手填路径是唯一确定性途径（TASK-034 记录的兼容性缺口）。
+   */
+  dshCredentialsPath: string;
 }
 
 export const DEFAULT_SETTINGS: DshPluginSettings = {
@@ -15,6 +22,7 @@ export const DEFAULT_SETTINGS: DshPluginSettings = {
   // 20 条消息/页：超长会话播种与「加载更早」的 Markdown 渲染量更轻（50 条大消息一次性渲染可能导致渲染进程卡死白屏，观察中）
   historyPageSize: 20,
   inlineEditSessionId: "",
+  dshCredentialsPath: "",
 };
 
 /** 设置防抖落盘延迟（ms）：输入过程中只改内存值，停顿后写一次盘。 */

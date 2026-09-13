@@ -2,7 +2,7 @@ import { Editor, Notice, Plugin, WorkspaceLeaf } from "obsidian";
 import { installNodeShims } from "./transport/nodeShims";
 import { DshSettings } from "./settings";
 import { DshClient } from "./transport/client";
-import { DshCookieAuth } from "./transport/auth";
+import { DshCookieAuth, readDshHomeEnv } from "./transport/auth";
 import type { MuxState, RemoteMuxTransport } from "./transport/muxStream";
 import { SessionStore } from "./core/store";
 import { SessionManager } from "./core/sessionManager";
@@ -53,7 +53,12 @@ export default class DshPlugin extends Plugin {
 
       const client = new DshClient({
         baseUrl,
-        auth: new DshCookieAuth({ baseUrl }),
+        // 凭据路径：设置项显式路径优先；留空则 $DSH_HOME（可达时）→ ~/.dsh（见 TASK-034）
+        auth: new DshCookieAuth({
+          baseUrl,
+          credentialsPath: this.settings.values.dshCredentialsPath || undefined,
+          dshHome: readDshHomeEnv(),
+        }),
         transportOptions: {
           onState: (state) => {
             runtime.muxState = state;

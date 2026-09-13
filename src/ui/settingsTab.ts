@@ -38,6 +38,11 @@ export class DshSettingTab extends PluginSettingTab {
         control: { type: "number", key: "historyPageSize", defaultValue: s.values.historyPageSize, min: 1, step: 1 },
       },
       {
+        name: t("settings.credentialsPathName"),
+        desc: t("settings.credentialsPathDesc"),
+        control: { type: "text", key: "dshCredentialsPath", defaultValue: s.values.dshCredentialsPath },
+      },
+      {
         name: t("settings.resetSessionName"),
         desc: t("settings.resetSessionDesc"),
         // 注意：声明式 action 的语义是「点击行时调用」，不是渲染回调——在其中 createEl 会在
@@ -144,6 +149,13 @@ export class DshSettingTab extends PluginSettingTab {
           s.values.historyPageSize = Math.floor(n);
           s.saveDebounced();
         }
+      })
+    );
+
+    new Setting(containerEl).setName(t("settings.credentialsPathName")).setDesc(t("settings.credentialsPathDesc")).addText((text) =>
+      text.setValue(s.values.dshCredentialsPath).onChange(async (v) => {
+        s.values.dshCredentialsPath = v.trim();
+        s.saveDebounced();
       })
     );
 

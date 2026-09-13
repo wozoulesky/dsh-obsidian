@@ -13,6 +13,7 @@ function fakePlugin() {
         inlineEditTimeoutSec: 120,
         historyPageSize: 50,
         inlineEditSessionId: "",
+        dshCredentialsPath: "",
       } satisfies DshPluginSettings,
       save: async () => {},
     },
@@ -94,12 +95,12 @@ describe("设置写入路径（TASK-028 项 1）", () => {
     const tab = new DshSettingTab(null as never, plugin as never);
     tab.display();
 
-    expect(mockTextOnChange).toHaveLength(4); // 4 个文本输入
+    expect(mockTextOnChange).toHaveLength(5); // 5 个文本输入（dshUrl / 提及上限 / 内联超时 / 历史页大小 / 凭据路径）
     for (const onChange of mockTextOnChange) {
       void onChange("1234");
       void onChange("1235");
     }
-    expect(calls.saveDebounced).toBe(8);
+    expect(calls.saveDebounced).toBe(10);
     expect(calls.save).toBe(0);
   });
 

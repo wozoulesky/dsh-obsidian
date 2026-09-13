@@ -145,6 +145,16 @@ export interface DshCookieAuthOptions {
    * 单测注入临时目录以测试真实文件路径分支。
    */
   homedir?: () => string;
+  /**
+   * 凭据文件的**完整路径**覆盖（设置项 `dshCredentialsPath`）。
+   * 非空时直接使用，忽略 homedir / dshHome——用于 DSH home 非默认且环境变量不可达的场景。
+   */
+  credentialsPath?: string;
+  /**
+   * DSH home 目录（DSH 官方的 `$DSH_HOME` 语义）。组合根（main.ts）经 `readDshHomeEnv()` 注入；
+   * 非空时凭据路径 = `<dshHome>/.credentials.yaml`。
+   */
+  dshHome?: string;
 }
 
 const CREDENTIALS_RECORD_KEY = "client-connection/browser-session";
@@ -189,24 +199,48 @@ export function extractSecretFromYaml(yamlText: string, recordKey: string = CRED
 }
 
 /**
- * 默认凭据文件路径：`<用户主目录>/.dsh/.credentials.yaml`。
+ * 读取 `$DSH_HOME` 环境变量（DSH 官方用它可以改变 home 目录，凭据随之落在 `<DSH_HOME>/.credentials.yaml`）。
+ *
+ * 渲染进程没有 `process` 全局，故沿 `nodeShims.ts` 的做法用 `window` 探测、
+ * 拿不到就返回 undefined（**绝不抛**）——这是尽力而为的兜底，不是唯一途径。
+ * 用户目录经 GUI 启动时环境变量常不传递，因此另有设置项 `dshCredentialsPath` 作为确定性途径。
+ */
+export function readDshHomeEnv(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  const g = window as unknown as Record<string, unknown>;
+  const proc = g.process as { env?: Record<string, string | undefined> } | undefined;
+  const value = proc?.env?.DSH_HOME;
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/**
+ * 解析凭据文件路径（**纯函数：只依赖入参，不读环境变量、不碰全局**）。
+ *
+ * 优先级：
+ * 1. `dshHome`：DSH home 目录（DSH 官方的 `$DSH_HOME` 语义）→ `<dshHome>/.credentials.yaml`
+ * 2. `<用户主目录>/.dsh/.credentials.yaml`（DSH 默认位置）
+ *
+ * `$DSH_HOME` 的读取刻意放在组合根（`main.ts` 经 `readDshHomeEnv()` 注入 `dshHome`），
+ * 不放在这里——否则本函数的行为会随宿主进程环境漂移，注入的 homedir 会被环境变量劫持（已实测踩到）。
  *
  * 渲染进程没有 `process` 全局（nodeIntegration=false），主目录一律经 `os.homedir()` 获取
  * （Windows 上走 GetHomeDirectoryW，不依赖 process.env）。homedir 为空/异常时抛 DshAuthError，
  * 保证 `new DshCookieAuth({baseUrl})` 同步路径不裸抛 ReferenceError/TypeError。
- * 单测可注入 homedir 函数；缺省使用 require("os") 与仓库既有 builtin 加载模式一致。
  */
-export function defaultCredentialsPath(homedir?: () => string): string {
-  let home: string;
+export function defaultCredentialsPath(homedir?: () => string, dshHome?: string): string {
+  if (dshHome !== undefined && dshHome.length > 0) {
+    return `${dshHome.replace(/[\\/]+$/u, "")}/.credentials.yaml`;
+  }
+  let userHome: string;
   try {
-    home = (homedir ?? loadOs().homedir)();
+    userHome = (homedir ?? loadOs().homedir)();
   } catch (err) {
     throw new DshAuthError("无法获取用户主目录（DSH 凭据位置未知）", err);
   }
-  if (!home) {
+  if (!userHome) {
     throw new DshAuthError("无法获取用户主目录（DSH 凭据位置未知）");
   }
-  return `${home.replace(/[\\/]+$/u, "")}/.dsh/.credentials.yaml`;
+  return `${userHome.replace(/[\\/]+$/u, "")}/.dsh/.credentials.yaml`;
 }
 
 /**
@@ -237,7 +271,9 @@ export class DshCookieAuth {
       this.readFile = opts.readCredentialsFile;
       this.readMtime = () => Promise.resolve(0);
     } else {
-      const path = defaultCredentialsPath(opts.homedir);
+      // 设置项显式路径优先（用户指定），否则按 dshHome($DSH_HOME) → <主目录>/.dsh 解析
+      const override = opts.credentialsPath;
+      const path = override !== undefined && override.length > 0 ? override : defaultCredentialsPath(opts.homedir, opts.dshHome);
       this.readFile = () =>
         new Promise<string>((resolve, reject) => {
           fs.readFile(path, "utf8", (err, data) => {

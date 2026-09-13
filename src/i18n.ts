@@ -130,6 +130,8 @@ export const DEFAULT_STRINGS: Record<string, string> = {
   "settings.inlineEditTimeoutName": "内联编辑超时（秒）",
   "settings.historyPageSizeName": "历史页大小",
   "settings.historyPageSizeDesc": "每次拉取会话历史的条数",
+  "settings.credentialsPathName": "DSH 凭据文件路径（留空自动）",
+  "settings.credentialsPathDesc": "默认自动查找 $DSH_HOME/.credentials.yaml，取不到则用 ~/.dsh/.credentials.yaml。若 DSH 用了自定义 home 且连不上，在此填完整路径",
   "settings.resetSessionName": "重置内联编辑专用会话",
   "settings.resetSessionDesc": "下次内联编辑将创建全新会话",
   "settings.resetButton": "重置",

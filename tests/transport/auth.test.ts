@@ -17,6 +17,7 @@ import {
   DshCookieAuth,
   encodeBase64Url,
   extractSecretFromYaml,
+  readDshHomeEnv,
   signCookie,
 } from "../../src/transport/auth";
 
@@ -161,6 +162,51 @@ describe("defaultCredentialsPath（os.homedir 实现）", () => {
   it("缺省走 require(\"os\").homedir()，等于 node:os.homedir()", () => {
     expect(defaultCredentialsPath()).toBe(`${homedir()}/.dsh/.credentials.yaml`);
   });
+
+  it("TASK-034：注入 DSH home 时用 <dshHome>/.credentials.yaml（DSH 官方 $DSH_HOME 语义），尾斜杠归一", () => {
+    expect(defaultCredentialsPath(() => "C:\\Users\\tester", "D:\\dsh-home")).toBe("D:\\dsh-home/.credentials.yaml");
+    expect(defaultCredentialsPath(() => "/home/tester", "/opt/dsh/")).toBe("/opt/dsh/.credentials.yaml");
+  });
+
+  it("TASK-034：dshHome 优先于 homedir（不再落到 ~/.dsh）", () => {
+    const out = defaultCredentialsPath(() => "C:\\Users\\tester", "D:\\custom");
+    expect(out).not.toContain(".dsh/.credentials.yaml");
+    expect(out).toBe("D:\\custom/.credentials.yaml");
+  });
+
+  it("TASK-034：空串 dshHome 视为未提供，退回 homedir 分支", () => {
+    expect(defaultCredentialsPath(() => "/home/tester", "")).toBe("/home/tester/.dsh/.credentials.yaml");
+  });
+});
+
+describe("readDshHomeEnv（$DSH_HOME 尽力而为读取）", () => {
+  const g = window as unknown as Record<string, unknown>;
+  const original = g.process;
+
+  afterEach(() => {
+    g.process = original;
+  });
+
+  it("process.env.DSH_HOME 可达时返回其值", () => {
+    g.process = { env: { DSH_HOME: "/opt/dsh" } };
+    expect(readDshHomeEnv()).toBe("/opt/dsh");
+  });
+
+  it("process 不可达（渲染进程常态）→ 返回 undefined，绝不抛", () => {
+    g.process = undefined;
+    expect(readDshHomeEnv()).toBeUndefined();
+  });
+
+  it("process 存在但无 env / DSH_HOME 为空或非字符串 → undefined", () => {
+    g.process = {};
+    expect(readDshHomeEnv()).toBeUndefined();
+    g.process = { env: {} };
+    expect(readDshHomeEnv()).toBeUndefined();
+    g.process = { env: { DSH_HOME: "" } };
+    expect(readDshHomeEnv()).toBeUndefined();
+    g.process = { env: { DSH_HOME: 123 } };
+    expect(readDshHomeEnv()).toBeUndefined();
+  });
 });
 
 describe("DshCookieAuth（注入读取函数）", () => {
@@ -276,6 +322,34 @@ describe("DshCookieAuth（真实文件路径：<homedir>/.dsh/.credentials.yaml�
     writeFileSync(credsPath, credsYaml(encodeBase64Url(SECRET_A)));
     const header = await auth.cookieHeader();
     expectSignedWith(header, SECRET_A);
+  });
+
+  it("TASK-034：dshHome 注入 → 读 <dshHome>/.credentials.yaml（DSH 官方 $DSH_HOME 语义）", async () => {
+    // DSH_HOME 语义下凭据就在 home 根下，而不是 <home>/.dsh/ 里
+    writeFileSync(join(dir, ".credentials.yaml"), credsYaml(encodeBase64Url(SECRET_A)));
+    const auth = new DshCookieAuth({ baseUrl: "http://127.0.0.1:3080", dshHome: dir });
+    expectSignedWith(await auth.cookieHeader(), SECRET_A);
+  });
+
+  it("TASK-034：credentialsPath 显式路径优先于 homedir 与 dshHome", async () => {
+    const explicit = join(dir, "custom-creds.yaml");
+    writeFileSync(explicit, credsYaml(encodeBase64Url(SECRET_A)));
+    // homedir 指向一个**没有**凭据的目录：若优先级错了会抛「无法读取」
+    const emptyHome = join(dir, "empty-home");
+    mkdirSync(emptyHome, { recursive: true });
+    const auth = new DshCookieAuth({
+      baseUrl: "http://127.0.0.1:3080",
+      credentialsPath: explicit,
+      homedir: () => emptyHome,
+      dshHome: join(dir, "no-such-home"),
+    });
+    expectSignedWith(await auth.cookieHeader(), SECRET_A);
+  });
+
+  it("TASK-034：credentialsPath 为空串视为未设置，退回自动解析", async () => {
+    writeFileSync(credsPath, credsYaml(encodeBase64Url(SECRET_A)));
+    const auth = new DshCookieAuth({ baseUrl: "http://127.0.0.1:3080", credentialsPath: "", homedir: () => dir });
+    expectSignedWith(await auth.cookieHeader(), SECRET_A);
   });
 
   it("并发取 cookie 只读一次凭据文件（refresh 去抖）", async () => {
