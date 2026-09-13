@@ -88,12 +88,14 @@ export function expandChunkRowEvent(row: ChunkRowEvent): ExpandedChunkEvent[] {
  * 非法 record（非对象/类型未知）防呆：原样透传（与官方「非行值原样通过」语义一致）。
  */
 export function expandChunkRow(record: SessionHistoryRecord): SessionEvent[] {
+  // 运行时防呆：声明类型不允许非对象，但线上畸形数据仍可能到达（此时 TS 已把 record 收窄为 never，
+  // 故无需断言——断言反而是多余的，社区审核 chunkRows.ts:92/96 已指出）。
   if (typeof record !== "object" || record === null) {
-    return [record as SessionEvent];
+    return [record];
   }
   if (record.type === "event") return [record.event];
   if (record.type === "chunks") return expandChunkRowEvent(record.event);
-  return [record as SessionEvent];
+  return [record];
 }
 
 /** 展开一个历史记录数组（页面/快照 records 的整体解包入口，批 4 播种用）。 */

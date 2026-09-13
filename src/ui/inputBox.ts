@@ -140,8 +140,9 @@ export class DshInputBox {
     if (this.pendingImages.length === 0 && this.renderedChips === 0) return;
     this.chipsEl.empty();
     this.pendingImages.forEach((image, index) => {
-      const chip = this.chipsEl.createEl("span", { cls: "dsh-attach-chip" });
-      chip.createEl("span", { text: `${image.path} (${formatBytes(image.byteLength)})` });
+      // 用 Obsidian 简写 createSpan（社区审核 prefer-create-el：字面量 "span"/"div" 不应传给 createEl）
+      const chip = this.chipsEl.createSpan({ cls: "dsh-attach-chip" });
+      chip.createSpan({ text: `${image.path} (${formatBytes(image.byteLength)})` });
       const remove = chip.createEl("button", { cls: "dsh-attach-remove", text: "✕", attr: { type: "button" } });
       remove.addEventListener("click", () => {
         this.pendingImages.splice(index, 1);

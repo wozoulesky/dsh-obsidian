@@ -42,6 +42,11 @@ class FakeEl {
     return el;
   }
 
+  /** 真实 Obsidian 元素同时提供 createSpan（简写）——替身必须同样建模，否则实现改用简写即假失败。 */
+  createSpan(opts?: { cls?: string; text?: string }): FakeEl {
+    return this.createEl("span", opts);
+  }
+
   createEl(tag: string, opts?: { cls?: string; text?: string }): FakeEl {
     const el = this.append(new FakeEl(tag, opts?.cls ?? ""));
     if (opts?.text !== undefined) el.text = opts.text;

@@ -33,3 +33,18 @@ export function nonEmptyStringField(source: object, key: string): string | undef
 export function isObject(value: unknown): value is object {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+/** 取可字符串化的字段值：字符串/数字/布尔/大整数按原义，其余（对象、函数、null…）视为缺省。 */
+export function stringField(source: object, key: string): string | undefined {
+  const value = readField(source, key);
+  switch (typeof value) {
+    case "string":
+      return value;
+    case "number":
+    case "boolean":
+    case "bigint":
+      return String(value);
+    default:
+      return undefined;
+  }
+}

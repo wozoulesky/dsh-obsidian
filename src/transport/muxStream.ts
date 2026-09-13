@@ -20,6 +20,7 @@ import WebSocket from "ws";
 import type { DshCookieAuth } from "./auth";
 import { mintId, type RemoteStreamClientMessage, type RemoteStreamServerMessage } from "./types";
 import { clearTimer, setTimer } from "../utils/timers";
+import { describeUnknown } from "../utils/describe";
 
 export type MuxState = "connected" | "reconnecting";
 
@@ -105,7 +106,7 @@ function inboxFailure(inbox: StreamInbox): Promise<never> {
 
 /** AbortSignal.reason → Error（非 Error reason 归一化，避免上层拿到裸字符串 throw）。 */
 function abortError(reason?: unknown): Error {
-  return reason instanceof Error ? reason : new Error(reason === undefined ? "stream aborted" : String(reason));
+  return reason instanceof Error ? reason : new Error(reason === undefined ? "stream aborted" : describeUnknown(reason));
 }
 
 /** 严格校验服务端帧（镜像官方 parseRemoteStreamServerMessage 的 exact-keys 校验；非法即抛）。 */

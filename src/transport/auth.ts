@@ -18,6 +18,8 @@
  * 覆盖「DSH 重启换 secret」场景。
  */
 
+import { describeUnknown } from "../utils/describe";
+
 declare function require(module: string): unknown;
 
 interface CryptoLike {
@@ -241,7 +243,7 @@ export class DshCookieAuth {
           fs.readFile(path, "utf8", (err, data) => {
             if (err) {
               reject(
-                new DshAuthError(`无法读取 DSH 凭据文件 ${path}：${err instanceof Error ? err.message : String(err)}`, err)
+                new DshAuthError(`无法读取 DSH 凭据文件 ${path}：${describeUnknown(err)}`, err)
               );
             } else {
               resolve(data ?? "");

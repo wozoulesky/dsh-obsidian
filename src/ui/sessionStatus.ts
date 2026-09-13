@@ -81,10 +81,13 @@ export interface TodoCounts {
 /** 统计三态数量（未知状态不计入任何一段，只在签名里体现，避免摘要长度虚高）。 */
 export function todoCounts(todos: readonly TodoItem[] | null | undefined): TodoCounts {
   if (!Array.isArray(todos)) return { done: 0, active: 0, pending: 0 };
+  // 显式标注回真类型：Array.isArray 会把元素类型放宽成 any[]，否则 item.status 属 unsafe member access
+  //（社区审核 sessionStatus.ts:88/89 已指出）。这是类型标注而非断言。
+  const list: readonly TodoItem[] = todos;
   let done = 0;
   let active = 0;
   let pending = 0;
-  for (const item of todos) {
+  for (const item of list) {
     if (item.status === "completed") done += 1;
     else if (item.status === "in_progress") active += 1;
     else pending += 1;
@@ -98,7 +101,9 @@ export function todoCounts(todos: readonly TodoItem[] | null | undefined): TodoC
  */
 export function todosSignature(todos: readonly TodoItem[] | null | undefined): string {
   if (!Array.isArray(todos) || todos.length === 0) return "";
-  return todos.map((item) => `${item.status}\u0001${item.content}`).join("\u0000");
+  // 同上：显式标注回真类型，避免 Array.isArray 放宽成 any[]（社区审核 sessionStatus.ts:101）
+  const list: readonly TodoItem[] = todos;
+  return list.map((item) => `${item.status}\u0001${item.content}`).join("\u0000");
 }
 
 /**

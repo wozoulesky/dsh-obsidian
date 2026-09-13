@@ -1,5 +1,5 @@
 import type { AssistantStreamFrame, ContentBlock, GoalProjection, ImageAttachmentLimits, ModelSelectionProjection, SessionEvent, StreamChunk } from "../transport/types";
-import { isObject, numberField, readField } from "./narrow";
+import { isObject, numberField, readField, stringField } from "./narrow";
 
 /**
  * tokenUsage 投影（0.1.5 真机实测逐字样本）：
@@ -412,7 +412,7 @@ export function foldEvent(view: SessionView, event: SessionEvent): void {
       // 图片块个数（TASK-030 项 3）：发图时 host 把内联 base64 提升为 durable 引用，
       // 历史事件里只剩引用本体——v1 只标记数量，不异步拉取图片回到 DOM。
       const imageCount = content.filter((b) => typeof b === "object" && b !== null && b.type === "image").length;
-      view.nodes.push({ kind: "user", id: String(data.id ?? `u-${event.seq}`), text, sourceKind, imageCount, seq: event.seq, rev: 0 });
+      view.nodes.push({ kind: "user", id: stringField(data, "id") ?? `u-${event.seq}`, text, sourceKind, imageCount, seq: event.seq, rev: 0 });
       break;
     }
     case "assistant/chunk": {
@@ -526,15 +526,15 @@ export function foldEvent(view: SessionView, event: SessionEvent): void {
     case "command/run":
       view.nodes.push({
         kind: "command",
-        id: String(data.commandId ?? `cmd-${event.seq}`),
-        name: String(data.name ?? ""),
+        id: stringField(data, "commandId") ?? `cmd-${event.seq}`,
+        name: stringField(data, "name") ?? "",
         status: "running",
         seq: event.seq,
         rev: 0,
       });
       break;
     case "command/done": {
-      const id = String(data.commandId ?? "");
+      const id = stringField(data, "commandId") ?? "";
       const status: CommandNode["status"] = data.kind === "success" ? "success" : "error";
       const text = typeof data.text === "string" ? data.text : undefined;
       for (const n of view.nodes) {
