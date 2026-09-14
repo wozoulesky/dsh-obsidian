@@ -60,9 +60,18 @@ export class TFolder {
   path = "";
 }
 
+/**
+ * 记录创建过的 Modal 实例（按创建顺序）。
+ * 供测试驱动**真实时序**——例如 `FuzzySuggestModal` 选中后会自动关闭模态框，
+ * 需要先调 `onChooseItem` 再调 `onClose` 才能复现（见 tests/ui/imagePicker.test.ts 与 TASK-044）。
+ */
+export const mockModals: Modal[] = [];
+
 /** Modal stub：只记录 open/close（真实实现负责 DOM 与遮罩）。 */
 export class Modal {
-  constructor(public app: unknown) {}
+  constructor(public app: unknown) {
+    mockModals.push(this);
+  }
   open(): void {
     this.opened += 1;
   }

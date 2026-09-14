@@ -26,6 +26,17 @@ export function pickVaultImage(app: App, placeholder: string): Promise<PickImage
 class VaultImageSuggestModal extends FuzzySuggestModal<TFile> {
   private settled = false;
 
+  /**
+   * `onChooseItem` 是否已触发。
+   *
+   * **为什么必须有这个标记**：Obsidian 的 `FuzzySuggestModal` 在选中后**会自动关闭模态框**，
+   * 即真实时序是 `onChooseItem` → 基类 `close()` → `onClose()`；而 `readBinary` 是异步的
+   * （`await` 至少推迟一个微任务），所以 `onClose` 一定先于读盘完成到达。
+   * 若把这次关闭当作"用户取消"，成功选中会被 `settled` 静默丢弃——模态框关闭、没有 chip、
+   * 也没有任何提示（真机复现与根因见 TASK-044）。故选中后必须让 `onClose` 让位。
+   */
+  private chosen = false;
+
   constructor(private appRef: App, placeholder: string, private settle: (result: PickImageResult) => void) {
     super(appRef);
     this.setPlaceholder(placeholder);
@@ -41,12 +52,14 @@ class VaultImageSuggestModal extends FuzzySuggestModal<TFile> {
   }
 
   override onChooseItem(file: TFile): void {
+    this.chosen = true;
     void this.readImage(file);
   }
 
   override onClose(): void {
-    // 未选择就关闭（Esc/点遮罩）：必须 resolve，否则 await 永久挂起
-    if (!this.settled) {
+    // 未选择就关闭（Esc/点遮罩）：必须 resolve，否则 await 永久挂起。
+    // 已选择时**不得**在此结算：读盘还在飞，结果由 readImage 自己 finish（见 chosen 注释）。
+    if (!this.settled && !this.chosen) {
       this.settled = true;
       this.settle({ ok: false, reason: "cancelled" });
     }
