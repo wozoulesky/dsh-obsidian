@@ -1,0 +1,54 @@
+name: CI
+
+# 目的：把「发版前必须绿」的几道门禁搬到每次推送/PR 上——尤其是**构建可复现**，
+# 它同时守住社区审核会做的「从源码重建产物比对」，以及 .gitattributes 钉住的
+# 「仓库字节 == Release 资产」不变式（见 TASK-037）。
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 与本机验证环境保持一致（Node 24 / npm 11）
+          node-version: 24
+          cache: npm
+
+      - name: 安装依赖（严格按 lockfile）
+        run: npm ci
+
+      - name: Lint（与社区审核同源规则）
+        run: npm run lint
+
+      - name: 单元测试
+        run: npm test
+
+      - name: 类型检查 + 构建
+        run: npm run build
+
+      - name: 构建可复现性（同源码两次构建必须字节一致）
+        run: |
+          sha256sum main.js > /tmp/build-1.sha
+          cat /tmp/build-1.sha
+          npm run build
+          sha256sum -c /tmp/build-1.sha
+
+      - name: 产物与仓库内 main.js 的差异（信息性，不阻断）
+        # 发版提交上两者应完全一致；日常开发分支上产物领先于已提交版本属预期，
+        # 因此只提示不失败——它同时也是「产物被异常改写（如行尾转换）」的哨兵。
+        continue-on-error: true
+        run: |
+          if git diff --quiet -- main.js; then
+            echo "✅ main.js 与仓库内提交版本一致"
+          else
+            echo "::notice title=main.js 与仓库内提交版本不一致::若这是发版提交，请按发布流程重新产出并 git add -f main.js；否则属日常开发预期。"
+            git diff --stat -- main.js || true
+            echo "构建产物 sha256: $(sha256sum main.js | cut -d' ' -f1)"
+          fi
