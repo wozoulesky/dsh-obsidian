@@ -1,0 +1,9 @@
+# 发布产物行尾策略
+#
+# main.js 是 esbuild 生成的构建产物，随 GitHub Release 分发；社区审核会从源码重建并做字节比对。
+# 本仓库 core.autocrlf=true，此前无 .gitattributes，导致 Windows 上 `git checkout -- main.js`
+# 会把产物转成 CRLF（151845 B），而 index blob 与已发布资产都是纯 LF（151829 B）：
+#   1) 破坏「仓库字节 == Release 资产」不变式；
+#   2) 即使字节正确，git status 仍会因 eol 判定把 main.js 误报为 modified（而 git diff 为空）。
+# 声明 -text 表示该文件不做任何行尾转换：checkout 原样写回 blob 字节，比较按字节精确判定。
+main.js -text
