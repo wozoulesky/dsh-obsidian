@@ -74,9 +74,16 @@ npm test       # unit tests (92)
 
 Transport: unary RPC over Node `http` (`POST /api/<namespace>/<method>` with `{args}` payload + self-signed browser-session cookie); live streams over a bundled `ws` WebSocket (`/api/remote.mux` — `session/follow`, `session/control`, `$events`). A core layer folds session events into view models; a UI layer renders the sidebar and modals.
 
-**Requires DSH ≥ 0.1.2-rc.1.** Older DSH versions (e.g. 0.1.0-rc.6) return 401/404 — upgrade DSH, or downgrade the plugin to 0.1.4.
+### DSH compatibility
 
-**Direct filesystem access (disclosed for community review):** DSH's browser-session authentication requires reading the signing secret from `~/.dsh/.credentials.yaml` (the DSH process's credentials store, outside the vault). The plugin reads this file **read-only** — it never writes, never logs its contents, and only uses the secret to sign the per-request cookie required by DSH 0.1.2-rc.1's API. The vault API cannot reach this path (it is outside the vault root), so Node `fs` is required for this one purpose.
+| DSH version line | Plugin version | Status |
+| --- | --- | --- |
+| **0.1.5 line** (verified on `0.1.5-rc.1`) | 0.1.6+ (incl. 0.1.7) | ✅ **Verified end to end** on a real vault (2026-09-13): streamed output, approvals, inline-edit diff, reconnect |
+| **0.1.2 line** (`0.1.2-rc.1`, `0.1.2`) | 0.1.5+ | ✅ **Supported** — the contract this plugin was built against. 0.1.6+ keeps it working through capability probing: the 0.1.5 streaming channel is requested field by field and dropped automatically if the server rejects it. Verified on a real machine at plugin 0.1.5, covered by unit tests since |
+| before 0.1.2 (e.g. `0.1.0-rc.6`) | ≤ 0.1.4 | ❌ **Not supported** — returns 401/404. Upgrade DSH, or stay on plugin 0.1.4 |
+| newer than the verified line | latest plugin | ⚠️ **Unverified** — DSH ships often and has already changed this plugin's contract twice (0.1.2 → 0.1.5). If the panel breaks after a DSH upgrade, check for a plugin update first |
+
+**Direct filesystem access (disclosed for community review):** DSH's browser-session authentication requires reading the signing secret from `~/.dsh/.credentials.yaml` (the DSH process's credentials store, outside the vault). The plugin reads this file **read-only** — it never writes, never logs its contents, and only uses the secret to sign the per-request cookie required by DSH's browser-session API (0.1.2-rc.1 onwards). The vault API cannot reach this path (it is outside the vault root), so Node `fs` is required for this one purpose.
 
 ## Related
 
