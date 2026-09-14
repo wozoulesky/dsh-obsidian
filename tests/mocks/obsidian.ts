@@ -38,9 +38,12 @@ export class PluginSettingTab {
   hidden = 0;
 }
 
-/** 通知 stub：只吞掉调用（测试不校验 Notice 文案）。 */
+/** 通知 stub：吞掉真实 DOM，但记录文案——「诊断连接」等交互的正确性靠文案断言。 */
+export const mockNotices: string[] = [];
 export class Notice {
-  constructor(_message?: string, _timeout?: number) {}
+  constructor(message?: string, _timeout?: number) {
+    if (typeof message === "string") mockNotices.push(message);
+  }
 }
 
 /**

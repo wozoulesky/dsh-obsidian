@@ -173,6 +173,8 @@ export class RemoteMuxTransport {
   private focusCleanup: (() => void) | null = null;
   /** 最近一次连接失败是否为 ECONNREFUSED（服务未启动）：决定退避策略。 */
   private lastRefused = false;
+  /** 自上次成功连接以来是否出现过 ECONNREFUSED：供状态栏给出「DSH 未运行」的可执行提示（诊断用，不参与退避）。 */
+  private refusedSinceOpen = false;
 
   constructor(
     private baseUrl: string,
@@ -191,6 +193,15 @@ export class RemoteMuxTransport {
   /** 当前状态（最近一次去重后的转换）。 */
   get state(): MuxState | null {
     return this.lastState;
+  }
+
+  /**
+   * 自上次连接成功以来是否出现过「连接被拒绝」。
+   * `lastRefused` 在每次调度重连时被清空（它是退避策略的输入），故 UI 不能直接读它——这里保留一个粘性标记，
+   * 让状态栏能把「重连中…」升级为「DSH 未运行（连接被拒绝）」，用户才知道该去启动 DSH。
+   */
+  get serviceDown(): boolean {
+    return this.refusedSinceOpen;
   }
 
   /** 物理 WS 地址：baseUrl http(s)→ws(s) + /api/remote.mux。 */
@@ -350,6 +361,7 @@ export class RemoteMuxTransport {
           finish(() => {
             this.socket = socket;
             this.attempt = 0;
+            this.refusedSinceOpen = false;
             this.emitState("connected");
             resolve(socket);
           });
@@ -364,6 +376,7 @@ export class RemoteMuxTransport {
           /* close 事件随后触发；记录 ECONNREFUSED 供 close 路径选择退避策略（服务未启动时固定短间隔轮询） */
           if (err && typeof err === "object" && (err as { code?: string }).code === "ECONNREFUSED") {
             this.lastRefused = true;
+            this.refusedSinceOpen = true;
           }
         });
       })();

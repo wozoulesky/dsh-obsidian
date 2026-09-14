@@ -62,7 +62,15 @@ export default class DshPlugin extends Plugin {
         transportOptions: {
           onState: (state) => {
             runtime.muxState = state;
-            this.statusBarEl.setText(state === "connected" ? i18n.t("main.statusConnected") : i18n.t("main.statusReconnecting"));
+            // 断线原因要能落到状态栏：ECONNREFUSED = DSH 没在跑（最高频的「为什么连不上」），
+            // 此时直接说「未运行」，而不是让用户对着「重连中…」猜。
+            this.statusBarEl.setText(
+              state === "connected"
+                ? i18n.t("main.statusConnected")
+                : client.mux.serviceDown
+                  ? i18n.t("main.statusNotRunning")
+                  : i18n.t("main.statusReconnecting")
+            );
             if (state === "connected") {
               // 物理连接就绪：重开两条全局流（首次连接与每次重连统一走这里；
               // $events 重开会拿新 clientId，approvals 由 ready 帧重新绑定）

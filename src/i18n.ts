@@ -9,6 +9,7 @@ export const DEFAULT_STRINGS: Record<string, string> = {
   // 状态栏 / 主命令
   "main.statusConnected": "DSH 已连接",
   "main.statusReconnecting": "DSH 重连中…",
+  "main.statusNotRunning": "DSH 未运行（连接被拒绝）· 重连中…",
   "main.openPanel": "打开 DSH 面板",
   "main.newSession": "新建 DSH 会话",
   "main.inlineEdit": "DSH 内联编辑选区",
@@ -142,6 +143,19 @@ export const DEFAULT_STRINGS: Record<string, string> = {
   "settings.exportI18nButton": "导出",
   "settings.exportI18nDone": "已导出 dsh-bridge.i18n.json 到 vault 根目录，翻译后重载插件生效",
   "settings.exportI18nFailed": "导出失败：{message}",
+
+  // 连接诊断（把 401/404/ECONNREFUSED 这类原始错误码翻译成可执行结论；见 src/core/diagnose.ts）
+  "settings.diagnoseName": "诊断连接",
+  "settings.diagnoseDesc": "检查本机 DSH 是否在运行、认证是否可用、版本是否兼容（走一次真实的会话列表调用，结果以通知显示）",
+  "settings.diagnoseButton": "诊断",
+  "settings.diagnoseOk": "连接正常：DSH 可访问、认证通过、会话列表可读",
+  "settings.diagnoseFailed": "连接异常：{hint}（技术细节：{detail}）",
+  "settings.diagnoseUnknown": "连接异常，未能归类：{detail}（可把这条错误发给开发者）",
+  "diag.notRunning": "本机 DSH 似乎没有在运行——先在终端里启动 `dsh web`，再回来重试",
+  "diag.unreachable": "DSH 地址解析不了——请检查设置里的「DSH 地址」是否写错（默认 http://127.0.0.1:3080）",
+  "diag.notResponding": "DSH 无响应（请求超时）——确认 `dsh web` 进程是否卡住，或端口是否被别的程序占用",
+  "diag.versionMismatch": "本机 DSH 版本过旧（接口返回 404）——本插件支持 DSH 0.1.2 线与 0.1.5 线，请升级 DSH（见 README 的 DSH 版本兼容性矩阵）",
+  "diag.authFailed": "认证失败（401）——可能是 DSH 版本与插件不匹配，或凭据文件读不到；可在下方指定「DSH 凭据文件路径」，并参见 README 的兼容性矩阵",
 
   // 内置命令联想（离线兜底清单；在线时描述用服务端返回的）
   "command.clear.desc": "清空当前会话并新建干净会话（/clear）",

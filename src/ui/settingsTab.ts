@@ -1,10 +1,30 @@
 import { App, Notice, PluginSettingTab, Setting, type SettingDefinitionItem } from "obsidian";
+import { probeDshConnection } from "../core/diagnose";
 import { DEFAULT_STRINGS, type I18nParams } from "../i18n";
 import type DshPlugin from "../main";
 
 export class DshSettingTab extends PluginSettingTab {
   constructor(app: App, private plugin: DshPlugin) {
     super(app, plugin);
+  }
+
+  /**
+   * 诊断按钮的共用实现（声明式与命令式两条渲染路径都调它，避免两处逻辑漂移）。
+   * 走一次真实的 `session.list`：同时穿过认证与 RPC 两层，通过即代表核心链路可用；
+   * 失败则把 401/404/ECONNREFUSED 归类成可执行结论（见 core/diagnose.ts）。
+   */
+  private async runDiagnosis(): Promise<void> {
+    const t = (key: string, params?: I18nParams) => this.plugin.runtime.i18n.t(key, params);
+    const outcome = await probeDshConnection(() => this.plugin.runtime.client.list());
+    if (outcome.ok) {
+      new Notice(t("settings.diagnoseOk"));
+      return;
+    }
+    new Notice(
+      outcome.hintKey
+        ? t("settings.diagnoseFailed", { hint: t(outcome.hintKey), detail: outcome.detail })
+        : t("settings.diagnoseUnknown", { detail: outcome.detail })
+    );
   }
 
   /** Obsidian 1.13+ 声明式设置定义（可被设置搜索索引）。 */
@@ -76,6 +96,13 @@ export class DshSettingTab extends PluginSettingTab {
               }
             })
           );
+        },
+      },
+      {
+        name: t("settings.diagnoseName"),
+        desc: t("settings.diagnoseDesc"),
+        render: (setting) => {
+          setting.addButton((b) => b.setButtonText(t("settings.diagnoseButton")).onClick(() => this.runDiagnosis()));
         },
       },
     ];
@@ -180,6 +207,9 @@ export class DshSettingTab extends PluginSettingTab {
           new Notice(t("settings.exportI18nFailed", { message: err instanceof Error ? err.message : String(err) }));
         }
       })
+    );
+    new Setting(containerEl).setName(t("settings.diagnoseName")).setDesc(t("settings.diagnoseDesc")).addButton((b) =>
+      b.setButtonText(t("settings.diagnoseButton")).onClick(() => this.runDiagnosis())
     );
   }
 }

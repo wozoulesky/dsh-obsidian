@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { I18n } from "../../src/i18n";
-import { mockButtonOnClick, mockTextOnChange, resetMockSettingHandlers } from "../mocks/obsidian";
+import { mockButtonOnClick, mockNotices, mockTextOnChange, resetMockSettingHandlers } from "../mocks/obsidian";
 import { DshSettingTab } from "../../src/ui/settingsTab";
 import type { DshPluginSettings } from "../../src/settings";
 
@@ -58,6 +58,84 @@ describe("DshSettingTab.display", () => {
   it("回退命令式 UI 同样不因 i18n.t 的 this 丢失而崩溃", () => {
     const tab = new DshSettingTab(null as never, fakePlugin() as never);
     expect(() => tab.display()).not.toThrow();
+  });
+});
+
+describe("诊断连接按钮", () => {
+  /** 诊断按钮需要一个能调 session.list 的 client；其余设置项沿用默认替身。 */
+  function pluginWithList(list: () => Promise<unknown>) {
+    return {
+      settings: {
+        values: { ...fakePlugin().settings.values },
+        save: async () => {},
+        saveDebounced: () => {},
+        flush: async () => {},
+      },
+      runtime: { i18n: new I18n(), client: { list } },
+    };
+  }
+
+  const DIAGNOSE_BUTTON_INDEX = 2; // display() 顺序：重置内联会话 / 导出 i18n / 诊断连接
+
+  it("连接被拒绝 → 给出「DSH 似乎没有运行」的可执行结论，而不是原始错误码", async () => {
+    resetMockSettingHandlers();
+    mockNotices.length = 0;
+    const tab = new DshSettingTab(
+      null as never,
+      pluginWithList(async () => {
+        throw new Error("connect ECONNREFUSED 127.0.0.1:3080");
+      }) as never
+    );
+    tab.display();
+    await mockButtonOnClick[DIAGNOSE_BUTTON_INDEX]();
+
+    expect(mockNotices.at(-1)).toContain("本机 DSH 似乎没有在运行");
+    expect(mockNotices.at(-1)).toContain("ECONNREFUSED"); // 技术细节仍保留，便于求助
+  });
+
+  it("HTTP 404 → 指向版本兼容结论（这是竞品 README 里最高频的用户困惑）", async () => {
+    resetMockSettingHandlers();
+    mockNotices.length = 0;
+    const tab = new DshSettingTab(
+      null as never,
+      pluginWithList(async () => ({ ok: false, error: { code: "gateway/not-found", message: "HTTP 404 for /api/session/list" } })) as never
+    );
+    tab.display();
+    await mockButtonOnClick[DIAGNOSE_BUTTON_INDEX]();
+
+    expect(mockNotices.at(-1)).toContain("版本过旧");
+  });
+
+  it("探测成功 → 明确说连接正常", async () => {
+    resetMockSettingHandlers();
+    mockNotices.length = 0;
+    const tab = new DshSettingTab(null as never, pluginWithList(async () => ({ ok: true, value: { items: [] } })) as never);
+    tab.display();
+    await mockButtonOnClick[DIAGNOSE_BUTTON_INDEX]();
+
+    expect(mockNotices.at(-1)).toContain("连接正常");
+  });
+
+  it("无法归类时保留原始错误并说明未归类，不编造结论", async () => {
+    resetMockSettingHandlers();
+    mockNotices.length = 0;
+    const tab = new DshSettingTab(
+      null as never,
+      pluginWithList(async () => {
+        throw new Error("something unexpected");
+      }) as never
+    );
+    tab.display();
+    await mockButtonOnClick[DIAGNOSE_BUTTON_INDEX]();
+
+    expect(mockNotices.at(-1)).toContain("未能归类");
+    expect(mockNotices.at(-1)).toContain("something unexpected");
+  });
+
+  it("声明式定义里也带诊断项（1.13+ 路径不会漏掉该功能）", () => {
+    const tab = new DshSettingTab(null as never, fakePlugin() as never);
+    const names = tab.getSettingDefinitions().map((d) => (d as { name?: string }).name);
+    expect(names).toContain("诊断连接");
   });
 });
 
