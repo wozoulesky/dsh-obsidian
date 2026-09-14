@@ -5,13 +5,13 @@ import { pickVaultImage } from "../../src/ui/imagePicker";
 /**
  * `pickVaultImage` 的选中时序回归（TASK-044）。
  *
- * 背景：Obsidian 的 `FuzzySuggestModal` 在选中后**自动关闭模态框**，真实时序为
- * `onChooseItem` → 基类 `close()` → `onClose()`；而读图是异步的，`onClose` 必然先到。
- * 修复前 `onClose` 把这次关闭当成"取消"，成功选中被静默丢弃 —— 真机表现为
- * **模态框关闭、没有 chip、也没有任何提示**（0.1.6/0.1.7 已发布版本均受影响）。
+ * **教训（值得留在文件顶部）**：第一版回归测试只覆盖了「先 onChooseItem 后 onClose」——
+ * 那是我**假设**的时序，测试因此全绿，而真机依旧坏的。真实时序来自 Obsidian 源码
+ * （`obsidian.asar`：`selectSuggestion → close() → onClose()`，之后才 `onChooseSuggestion → onChooseItem`），
+ * 即 **onClose 在前、onChooseItem 在后**。所以这里**两种顺序都要测**，真实顺序（close 在前）是主用例。
  *
- * 这些用例走的是**真实模态框类**（不经 mock 掉 pickVaultImage 的上层测试），
- * 因为缺陷只存在于这条时序里。
+ * 这些用例走**真实模态框类**（上层 `inputBox` 测试把 `pickVaultImage` 整体 mock 掉了，
+ * 缺陷只存在于这条时序里，mock 掉就永远测不到）。
  */
 
 interface ModalLike {
@@ -42,24 +42,35 @@ describe("pickVaultImage 选中时序（TASK-044）", () => {
     mockModals.length = 0;
   });
 
-  it("选中后基类自动关闭 → 不得判定为取消，应返回选中的图片", async () => {
+  it("【真实时序】onClose（基类先关）→ onChooseItem：必须返回选中的图片", async () => {
     const file = { path: "notes/a.png" };
     const promise = pickVaultImage(fakeApp([file]) as never, "选择图片");
 
     const modal = lastModal();
-    modal.onChooseItem(file); // 用户选中（同步返回，读盘在飞）
-    modal.onClose(); // 基类随后自动关闭——修复前这里会 settle 成 cancelled
+    modal.onClose(); // Obsidian：close() 先跑完（同步 onClose）
+    modal.onChooseItem(file); // 之后才通知选中——修复前这一步的结果会被 settled 挡掉
 
     await expect(promise).resolves.toMatchObject({ ok: true, image: { path: "notes/a.png", mediaType: "image/png" } });
   });
 
-  it("未选择就关闭（Esc / 点遮罩）→ 仍判为取消（不能因为修 bug 把这个路径弄丢）", async () => {
+  it("反向时序 onChooseItem → onClose 也必须成立（防御上游改序）", async () => {
+    const file = { path: "notes/c.webp" };
+    const promise = pickVaultImage(fakeApp([file]) as never, "选择图片");
+
+    const modal = lastModal();
+    modal.onChooseItem(file);
+    modal.onClose();
+
+    await expect(promise).resolves.toMatchObject({ ok: true, image: { path: "notes/c.webp", mediaType: "image/webp" } });
+  });
+
+  it("未选择就关闭（Esc / 点遮罩）→ 仍判为取消，且不会永久挂起", async () => {
     const promise = pickVaultImage(fakeApp([]) as never, "选择图片");
     lastModal().onClose();
     await expect(promise).resolves.toEqual({ ok: false, reason: "cancelled" });
   });
 
-  it("读盘失败也算有结果（readFailed），不得挂起", async () => {
+  it("真实时序下读盘失败 → readFailed（不得被误判成取消）", async () => {
     const file = { path: "notes/b.png" };
     const promise = pickVaultImage(
       fakeApp([file], async () => {
@@ -68,8 +79,8 @@ describe("pickVaultImage 选中时序（TASK-044）", () => {
       "选择图片"
     );
     const modal = lastModal();
-    modal.onChooseItem(file);
     modal.onClose();
+    modal.onChooseItem(file);
     await expect(promise).resolves.toEqual({ ok: false, reason: "readFailed" });
   });
 
@@ -92,8 +103,8 @@ describe("pickVaultImage 选中时序（TASK-044）", () => {
     });
     const promise = pickVaultImage(app as never, "选择图片");
     const modal = lastModal();
-    modal.onChooseItem({ path: "notes/c.txt" });
     modal.onClose();
+    modal.onChooseItem({ path: "notes/c.txt" });
     await expect(promise).resolves.toEqual({ ok: false, reason: "unsupported" });
     expect(read).toBe(0);
   });

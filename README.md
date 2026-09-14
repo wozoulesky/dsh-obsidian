@@ -12,7 +12,7 @@ Most Obsidian ↔ agent bridges wrap a web UI or shell out to a CLI. This one is
 - **Inline edit with a word-level diff** — select text, give an instruction, review the diff, apply; `Cmd+Z` undoes it.
 - **Approvals land where you are** — DSH's write/exec confirmations and its questions appear inside the panel, no window switching, and they survive a reconnect.
 - **Connection diagnosis** — `401` / `404` / connection-refused are translated into an actionable conclusion (Settings → *Diagnose connection*).
-- **Engineered to last** — 555 unit tests, strict TypeScript build, byte-reproducible artifacts, listed in the community directory.
+- **Engineered to last** — 550+ unit tests, strict TypeScript build, byte-reproducible artifacts, listed in the community directory.
 
 The plugin is a client, not a runtime: it needs a local DSH to talk to (see Prerequisites). If something looks wrong, the diagnose button will tell you which of the two it is.
 
@@ -96,7 +96,7 @@ The vault-root file takes priority; a legacy `i18n.json` inside the plugin direc
 ```bash
 npm install
 npm run dev    # watch build
-npm test       # unit tests (555)
+npm test       # unit tests
 ```
 
 ## Architecture

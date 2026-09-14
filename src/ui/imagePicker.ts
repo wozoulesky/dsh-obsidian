@@ -27,13 +27,22 @@ class VaultImageSuggestModal extends FuzzySuggestModal<TFile> {
   private settled = false;
 
   /**
-   * `onChooseItem` 是否已触发。
+   * `onChooseItem` 是否已触发（已确认选中）。
    *
-   * **为什么必须有这个标记**：Obsidian 的 `FuzzySuggestModal` 在选中后**会自动关闭模态框**，
-   * 即真实时序是 `onChooseItem` → 基类 `close()` → `onClose()`；而 `readBinary` 是异步的
-   * （`await` 至少推迟一个微任务），所以 `onClose` 一定先于读盘完成到达。
-   * 若把这次关闭当作"用户取消"，成功选中会被 `settled` 静默丢弃——模态框关闭、没有 chip、
-   * 也没有任何提示（真机复现与根因见 TASK-044）。故选中后必须让 `onClose` 让位。
+   * **为什么需要它 + 为什么必须在 `onClose` 里推迟判定**——Obsidian 的真实时序（2026-09-15 对照
+   * `obsidian.asar` 源码逐行核实，路径 `useSelectedItem → chooser.selectSuggestion`，点击与回车共用）：
+   *
+   * ```js
+   * selectSuggestion(item, evt) { this.close(); this.isOpen = false; this.onChooseSuggestion(item, evt); }
+   * Modal.prototype.close()      { …; o(); }        // 桌面端 o() 同步执行 → 同步调用 onClose()
+   * FuzzySuggestModal.onChooseSuggestion = (i, e) => this.onChooseItem(i.item, e)
+   * ```
+   *
+   * 即 **`onClose()` 先于 `onChooseItem()` 同步触发**。所以原实现（在 onClose 里立即 resolve
+   * `cancelled`）必然把随后到达的选中结果挡在 `settled` 之外——现象是模态框关闭、没有 chip、
+   * 也没有任何提示（0.1.6/0.1.7 起对真实用户完全不可用，见 TASK-044）。
+   * 任何"在 onChooseItem 里加个标记再让 onClose 让位"的写法都救不了：那个标记此刻还是 false。
+   * 唯一稳的做法是**把取消判定推迟一个微任务**，让同一同步块内随后的 onChooseItem 有机会胜出。
    */
   private chosen = false;
 
@@ -57,12 +66,14 @@ class VaultImageSuggestModal extends FuzzySuggestModal<TFile> {
   }
 
   override onClose(): void {
-    // 未选择就关闭（Esc/点遮罩）：必须 resolve，否则 await 永久挂起。
-    // 已选择时**不得**在此结算：读盘还在飞，结果由 readImage 自己 finish（见 chosen 注释）。
-    if (!this.settled && !this.chosen) {
-      this.settled = true;
-      this.settle({ ok: false, reason: "cancelled" });
-    }
+    // 未选择就关闭（Esc / 点遮罩）必须 resolve，否则调用方的 await 永久挂起；
+    // 但判定要等当前同步块跑完——因为选中的回调就排在它后面（见 chosen 注释）。
+    queueMicrotask(() => {
+      if (!this.settled && !this.chosen) {
+        this.settled = true;
+        this.settle({ ok: false, reason: "cancelled" });
+      }
+    });
   }
 
   private async readImage(file: TFile): Promise<void> {
