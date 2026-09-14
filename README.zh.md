@@ -56,6 +56,14 @@
 | --- | --- |
 | ![内联编辑词级 diff 预览](https://raw.githubusercontent.com/wozoulesky/dsh-obsidian/master/docs/screenshots/03-inline-edit-diff.png) | ![DSH 工具审批弹窗](https://raw.githubusercontent.com/wozoulesky/dsh-obsidian/master/docs/screenshots/04-approval.png) |
 
+| 思考过程与上下文用量 | 待办与目标 |
+| --- | --- |
+| ![流式中的可折叠思考过程块 + 上下文/输出用量状态行](https://raw.githubusercontent.com/wozoulesky/dsh-obsidian/master/docs/screenshots/05-thinking-context.png) | ![实时待办清单（三态）+ Goal 目标条](https://raw.githubusercontent.com/wozoulesky/dsh-obsidian/master/docs/screenshots/06-todos-goal.png) |
+
+| 模型与推理档位 | 连接诊断 |
+| --- | --- |
+| ![按 provider 分组的模型下拉 + 推理档位选择](https://raw.githubusercontent.com/wozoulesky/dsh-obsidian/master/docs/screenshots/07-model-effort.png) | ![设置 →「诊断连接」报告连接正常](https://raw.githubusercontent.com/wozoulesky/dsh-obsidian/master/docs/screenshots/09-diagnose-ok.png) |
+
 ## 安装（社区插件库）
 
 1. 设置 → 第三方插件 → 浏览 → 搜索 **DSH Bridge** → 安装 → 启用（仅桌面端）

@@ -56,6 +56,14 @@ Long sessions stay bounded: when DSH compacts history, replaced messages collaps
 | --- | --- |
 | ![Inline edit word-level diff preview](https://raw.githubusercontent.com/wozoulesky/dsh-obsidian/master/docs/screenshots/03-inline-edit-diff.png) | ![DSH tool approval popup](https://raw.githubusercontent.com/wozoulesky/dsh-obsidian/master/docs/screenshots/04-approval.png) |
 
+| Thinking process & context usage | Todos & goal |
+| --- | --- |
+| ![Collapsible reasoning block while streaming, with the context/usage status line](https://raw.githubusercontent.com/wozoulesky/dsh-obsidian/master/docs/screenshots/05-thinking-context.png) | ![Live todo list with three states and the goal bar](https://raw.githubusercontent.com/wozoulesky/dsh-obsidian/master/docs/screenshots/06-todos-goal.png) |
+
+| Model & reasoning effort | Connection diagnosis |
+| --- | --- |
+| ![Model dropdown grouped by provider, next to the reasoning-effort selector](https://raw.githubusercontent.com/wozoulesky/dsh-obsidian/master/docs/screenshots/07-model-effort.png) | ![Settings → Diagnose connection reporting a healthy connection](https://raw.githubusercontent.com/wozoulesky/dsh-obsidian/master/docs/screenshots/09-diagnose-ok.png) |
+
 ## Installation (Community Plugins)
 
 1. Settings → Third-party plugins → Browse → search **DSH Bridge** → Install → Enable (desktop only)
