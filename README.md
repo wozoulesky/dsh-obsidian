@@ -4,6 +4,18 @@ Embed your locally running [DeepSeek Harness (DSH)](https://www.npmjs.com/packag
 
 [中文文档](./README.zh.md)
 
+## Why this plugin
+
+Most Obsidian ↔ agent bridges wrap a web UI or shell out to a CLI. This one is a **native client**: it speaks DSH's own RPC and event stream, then renders everything with Obsidian's own UI.
+
+- **Native, not embedded** — chat, tool cards, approvals and plan mode are real Obsidian UI: your theme, your fonts, your hotkeys.
+- **Inline edit with a word-level diff** — select text, give an instruction, review the diff, apply; `Cmd+Z` undoes it.
+- **Approvals land where you are** — DSH's write/exec confirmations and its questions appear inside the panel, no window switching, and they survive a reconnect.
+- **Connection diagnosis** — `401` / `404` / connection-refused are translated into an actionable conclusion (Settings → *Diagnose connection*).
+- **Engineered to last** — 550 unit tests, strict TypeScript build, byte-reproducible artifacts, listed in the community directory.
+
+The plugin is a client, not a runtime: it needs a local DSH to talk to (see Prerequisites). If something looks wrong, the diagnose button will tell you which of the two it is.
+
 ## Prerequisites
 
 - A running DSH instance on your machine (default `http://127.0.0.1:3080`)
@@ -12,15 +24,24 @@ Embed your locally running [DeepSeek Harness (DSH)](https://www.npmjs.com/packag
 
 ## Features
 
-- **Chat sidebar** — streamed responses, tool-call cards, approval/question popups (retryable), session switching and creation, "load older" pagination, and automatic re-sync after reconnects
+**Conversation**
+
+- **Chat sidebar** — streamed responses, tool-call cards, session switching and creation, "load older" pagination, and automatic re-sync after reconnects
+- **Approval & question popups** — retryable, grouped per session, replayed after a reconnect
+- **Thinking process** — collapsible reasoning block above each reply, streamed live and folded once the turn completes
+- **Image attachments** — attach images from your vault to a prompt; the agent reads them directly
+
+**Editing your notes**
+
 - **Inline edit** — select text + hotkey → instruction → word-level diff preview → apply (editor selection is re-validated before applying; large selections degrade to a plain confirm dialog)
 - **@mentions** — type `@` to pick vault files (`@file:path`, content injected) or folders (`@folder:path`, directory tree injected), with truncation and missing-file notices
 - **Slash commands & plan mode** — commands come from the running DSH (so the list always matches your install), plus the local `/clear`; `Shift+Tab` toggles plan mode with a status banner
+
+**Context & control**
+
 - **Model & reasoning effort** — pick provider/model and reasoning effort from the panel; the list is grouped from your DSH model catalog
-- **Thinking process** — collapsible reasoning block above each reply, streamed live and folded once the turn completes
 - **Context usage** — a status line showing projected tokens against the context window, plus output tokens
 - **Todo list** — the agent's live todo list with pending / in-progress / completed states
-- **Image attachments** — attach images from your vault to a prompt; the agent reads them directly
 - **Goal panel** — view and control a long-running goal (create / pause / resume / complete / clear)
 
 Long sessions stay bounded: when DSH compacts history, replaced messages collapse into the summary instead of piling up.
@@ -67,7 +88,7 @@ The vault-root file takes priority; a legacy `i18n.json` inside the plugin direc
 ```bash
 npm install
 npm run dev    # watch build
-npm test       # unit tests (92)
+npm test       # unit tests (550)
 ```
 
 ## Architecture
