@@ -63,7 +63,7 @@ describe("DshSettingTab.display", () => {
 
 describe("诊断连接按钮", () => {
   /** 诊断按钮需要一个能调 session.list 的 client；其余设置项沿用默认替身。 */
-  function pluginWithList(list: () => Promise<unknown>) {
+  function pluginWithList(list: () => Promise<unknown>, detected: string | null = null) {
     return {
       settings: {
         values: { ...fakePlugin().settings.values },
@@ -72,6 +72,8 @@ describe("诊断连接按钮", () => {
         flush: async () => {},
       },
       runtime: { i18n: new I18n(), client: { list } },
+      // 端口探测替身：默认「没探到别的入口」，各用例按需覆盖
+      findWorkingDshUrl: async () => detected,
     };
   }
 
@@ -104,6 +106,21 @@ describe("诊断连接按钮", () => {
     await mockButtonOnClick[DIAGNOSE_BUTTON_INDEX]();
 
     expect(mockNotices.at(-1)).toContain("版本过旧");
+  });
+
+  it("诊断失败但探测到另一个入口 → 落盘并提示重载，而不是报「未运行」", async () => {
+    resetMockSettingHandlers();
+    mockNotices.length = 0;
+    const plugin = pluginWithList(async () => {
+      throw new Error("connect ECONNREFUSED 127.0.0.1:3080");
+    }, "http://127.0.0.1:19387");
+    const tab = new DshSettingTab(null as never, plugin as never);
+    tab.display();
+    await mockButtonOnClick[DIAGNOSE_BUTTON_INDEX]();
+
+    expect(plugin.settings.values.dshUrl).toBe("http://127.0.0.1:19387");
+    expect(mockNotices.at(-1)).toContain("检测到 DSH 在 http://127.0.0.1:19387");
+    expect(mockNotices.at(-1)).toContain("重启 Obsidian");
   });
 
   it("探测成功 → 明确说连接正常", async () => {

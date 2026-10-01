@@ -80,3 +80,69 @@ export async function probeDshConnection(list: () => Promise<RpcResult<unknown>>
     return { ok: false, detail, kind, hintKey: failureHintKey(kind) };
   }
 }
+
+/* ---- 端口自动探测 ---- */
+
+/**
+ * DSH 的两个入口端口（都不是动态端口，只是启动方式不同）：
+ * - `DSH_DESKTOP_URL`：桌面 App 固定 19387（`dsh-desktop-host` 硬编码 `--port 19387`）
+ * - `DSH_CLI_URL`：`dsh --profile web` 默认 3080（`dsh-web-app` 的 `port ?? 3080`）
+ *
+ * 事实来源与核查记录：docs/dsh-0.2-compat-audit-2026-10-01.md 第 5 节。
+ * 顺序即优先级——两个都活着时选桌面端口。
+ */
+export const DSH_DESKTOP_URL = "http://127.0.0.1:19387";
+export const DSH_CLI_URL = "http://127.0.0.1:3080";
+
+/** 归一化为 `URL.href`（`http://127.0.0.1:3080` → `http://127.0.0.1:3080/`）；非法地址返回 null。 */
+function hrefOf(url: string): string | null {
+  try {
+    return new URL(url).href;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 给出「配置地址之外」的候选探测地址，按优先级排列（桌面优先）。
+ *
+ * 只在配置地址指向 loopback 时才给候选——19387/3080 只对 loopback 成立，远端地址不该被本地端口顶掉。
+ * 非法地址或非 loopback 一律返回空数组（不猜）。
+ * `localhost` 也算 loopback：DSH 只绑 127.0.0.1，而 macOS 上 `localhost` 可能先解析到 ::1，
+ * 此时探测 `127.0.0.1:3080` 正好把这种「地址写法导致的连不上」一起修掉。
+ */
+export function candidateDshUrls(configuredUrl: string): string[] {
+  let hostname: string;
+  try {
+    hostname = new URL(configuredUrl).hostname;
+  } catch {
+    return [];
+  }
+  if (hostname !== "127.0.0.1" && hostname !== "localhost" && hostname !== "[::1]") return [];
+  const configured = hrefOf(configuredUrl);
+  return [DSH_DESKTOP_URL, DSH_CLI_URL].filter((url) => hrefOf(url) !== configured);
+}
+
+/**
+ * 并发探测全部候选，返回**优先级最高**的可用地址；都不行返回 null。
+ *
+ * 并发（而不是逐个串行）是为了给 onload 路径的最坏耗时封顶：串行 N 个候选最坏 N × 超时，
+ * 并发只等于 1 × 超时。代价是「第一个就通」时多探一次——本地回环上可忽略。
+ * `probe` 抛错一律视为不可用：探测是尽力而为，绝不能把插件加载拖挂。
+ */
+export async function firstReachableDshUrl(
+  candidates: string[],
+  probe: (url: string) => Promise<boolean>
+): Promise<string | null> {
+  if (candidates.length === 0) return null;
+  const results = await Promise.all(
+    candidates.map((url) =>
+      probe(url).then(
+        (ok) => ok === true,
+        () => false
+      )
+    )
+  );
+  const index = results.findIndex(Boolean);
+  return index === -1 ? null : candidates[index];
+}

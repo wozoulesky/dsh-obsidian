@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  DSH_CLI_URL,
+  DSH_DESKTOP_URL,
+  candidateDshUrls,
   classifyDshFailure,
   failureHintKeyFor,
+  firstReachableDshUrl,
   probeDshConnection,
 } from "../../src/core/diagnose";
 
@@ -89,5 +93,78 @@ describe("probeDshConnection", () => {
     const list = vi.fn(async () => ({ ok: true, value: {} }) as const);
     await probeDshConnection(list);
     expect(list).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("candidateDshUrls", () => {
+  it("配置成 CLI 默认端口时，候选只剩桌面端口（去重 + 桌面优先）", () => {
+    expect(candidateDshUrls("http://127.0.0.1:3080")).toEqual([DSH_DESKTOP_URL]);
+    // 带尾斜杠/路径是同一个地址，仍应被去重
+    expect(candidateDshUrls("http://127.0.0.1:3080/")).toEqual([DSH_DESKTOP_URL]);
+  });
+
+  it("配置成桌面端口时，候选是 CLI 端口", () => {
+    expect(candidateDshUrls("http://127.0.0.1:19387")).toEqual([DSH_CLI_URL]);
+  });
+
+  it("自定义 loopback 端口：两个候选都在，且桌面端口排第一（两个都活时选桌面）", () => {
+    expect(candidateDshUrls("http://127.0.0.1:8080")).toEqual([DSH_DESKTOP_URL, DSH_CLI_URL]);
+  });
+
+  it("localhost 也算 loopback：候选用 127.0.0.1，顺带修掉「localhost 先解析到 ::1」的连不上", () => {
+    expect(candidateDshUrls("http://localhost:3080")).toEqual([DSH_DESKTOP_URL, DSH_CLI_URL]);
+  });
+
+  it("非 loopback 地址不给候选：远端地址不该被本地端口顶掉", () => {
+    expect(candidateDshUrls("http://192.168.1.5:3080")).toEqual([]);
+    expect(candidateDshUrls("https://dsh.example.com")).toEqual([]);
+  });
+
+  it("非法地址返回空数组（不猜）", () => {
+    expect(candidateDshUrls("not a url")).toEqual([]);
+    expect(candidateDshUrls("")).toEqual([]);
+  });
+});
+
+describe("firstReachableDshUrl", () => {
+  it("返回优先级最高的可用地址，而不是最快返回的那个", async () => {
+    const probe = vi.fn(async (url: string) => {
+      if (url === DSH_CLI_URL) return true; // CLI 先返回，但桌面端口优先级更高
+      await new Promise((r) => setTimeout(r, 5));
+      return url === DSH_DESKTOP_URL;
+    });
+    await expect(firstReachableDshUrl([DSH_DESKTOP_URL, DSH_CLI_URL], probe)).resolves.toBe(DSH_DESKTOP_URL);
+  });
+
+  it("都不可用 → null", async () => {
+    await expect(firstReachableDshUrl([DSH_DESKTOP_URL, DSH_CLI_URL], async () => false)).resolves.toBeNull();
+  });
+
+  it("probe 抛错视为不可用，且不外溢", async () => {
+    const probe = async (url: string) => {
+      if (url === DSH_DESKTOP_URL) throw new Error("boom");
+      return true;
+    };
+    await expect(firstReachableDshUrl([DSH_DESKTOP_URL, DSH_CLI_URL], probe)).resolves.toBe(DSH_CLI_URL);
+  });
+
+  it("并发探测（最坏耗时 = 1 × 超时，而不是 N × 超时）", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const probe = async () => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((r) => setTimeout(r, 5));
+      inFlight -= 1;
+      return false;
+    };
+    await firstReachableDshUrl([DSH_DESKTOP_URL, DSH_CLI_URL], probe);
+    expect(maxInFlight).toBe(2);
+  });
+
+  it("空候选直接返回 null，不调用 probe", async () => {
+    const probe = vi.fn(async () => true);
+    await expect(firstReachableDshUrl([], probe)).resolves.toBeNull();
+    expect(probe).not.toHaveBeenCalled();
   });
 });
