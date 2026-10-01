@@ -18,7 +18,7 @@ The plugin is a client, not a runtime: it needs a local DSH to talk to (see Prer
 
 ## Prerequisites
 
-- A running DSH instance on your machine (default `http://127.0.0.1:3080`)
+- A running DSH instance on your machine. The port depends on how you start it: the **desktop app pins `http://127.0.0.1:19387`**, the `dsh web` command defaults to `http://127.0.0.1:3080`. On startup the plugin **auto-detects** both (desktop first) and writes the working one back to settings — **you normally don't need to type an address**
 - Your vault must be inside DSH's accessible directory scope (decided by DSH's sandbox / workspace config)
 - Obsidian ≥ 1.7.2, desktop only
 
@@ -67,7 +67,7 @@ Long sessions stay bounded: when DSH compacts history, replaced messages collaps
 ## Installation (Community Plugins)
 
 1. Settings → Third-party plugins → Browse → search **DSH Bridge** → Install → Enable (desktop only)
-2. Make sure DSH is running locally (default `http://127.0.0.1:3080`)
+2. Make sure DSH is running locally and the plugin's DSH address matches it: `http://127.0.0.1:19387` for the desktop app, `http://127.0.0.1:3080` for `dsh web`
 
 Prefer a manual install? Grab the latest artifacts from the [GitHub releases page](https://github.com/wozoulesky/dsh-obsidian/releases) and extract them into `vault/.obsidian/plugins/dsh-bridge/`.
 
@@ -107,10 +107,11 @@ Transport: unary RPC over Node `http` (`POST /api/<namespace>/<method>` with `{a
 
 | DSH version line | Plugin version | Status |
 | --- | --- | --- |
+| **0.2 line** (verified on `0.2.0-rc.2`) | 0.1.8+ (current) | ✅ **Protocol-layer verification and in-Obsidian UI acceptance both pass** (2026-10-01): the plugin's own code connected to a live 0.2.0-rc.2 over real HTTP + WebSocket — authentication, all 18 RPC endpoints, and the `$events` / `session/control` / `session/follow` streams pass; and a real Obsidian 1.13.7 accepted @-mentions, streaming output, approval-gated file writes, inline-edit diff, and port auto-detection. **0.2 did not change auth, the RPC envelope, or the WS frame protocol**, so no upgrade work is needed. The one gotcha is the port: the desktop app pins 19387, `dsh web` defaults to 3080 — the plugin **auto-detects** it (desktop first), so you normally don't set it by hand. Per-item record and verification boundaries: [docs/dsh-0.2-compat-audit-2026-10-01.md](docs/dsh-0.2-compat-audit-2026-10-01.md) |
 | **0.1.5 line** (verified on `0.1.5-rc.1`) | 0.1.6+ (incl. 0.1.7) | ✅ **Verified end to end** on a real vault (2026-09-13): streamed output, approvals, inline-edit diff, reconnect |
 | **0.1.2 line** (`0.1.2-rc.1`, `0.1.2`) | 0.1.5+ | ✅ **Supported** — the contract this plugin was built against. 0.1.6+ keeps it working through capability probing: the 0.1.5 streaming channel is requested field by field and dropped automatically if the server rejects it. Verified on a real machine at plugin 0.1.5, covered by unit tests since |
 | before 0.1.2 (e.g. `0.1.0-rc.6`) | ≤ 0.1.4 | ❌ **Not supported** — returns 401/404. Upgrade DSH, or stay on plugin 0.1.4 |
-| newer than the verified line | latest plugin | ⚠️ **Unverified** — DSH ships often and has already changed this plugin's contract twice (0.1.2 → 0.1.5). If the panel breaks after a DSH upgrade, check for a plugin update first |
+| newer than 0.2 (0.3+) | latest plugin | ⚠️ **Unverified** — DSH ships often and has already changed this plugin's contract twice (0.1.2 → 0.1.5). If the panel breaks after a DSH upgrade, check for a plugin update first |
 
 **Direct filesystem access (disclosed for community review):** DSH's browser-session authentication requires reading the signing secret from `~/.dsh/.credentials.yaml` (the DSH process's credentials store, outside the vault). The plugin reads this file **read-only** — it never writes, never logs its contents, and only uses the secret to sign the per-request cookie required by DSH's browser-session API (0.1.2-rc.1 onwards). The vault API cannot reach this path (it is outside the vault root), so Node `fs` is required for this one purpose.
 
