@@ -385,6 +385,30 @@ describe("RemoteMuxTransport 握手与杂项", () => {
     await new Promise<void>((resolve) => late.close(() => resolve()));
   });
 
+  it("ECONNREFUSED 后必须重新通知状态，否则状态栏读不到 serviceDown、永远停在「重连中…」", async () => {
+    // 真机复现（2026-10-01）：杀掉入口 35 秒后状态栏仍是「DSH 重连中…」，
+    // 因为 serviceDown 在 onState 之后才翻 true，而 emitState 的去重把后续通知全吞了。
+    // 断言写成「必须有一次回调时 serviceDown 已经为 true」——这才是 UI 能改口的前提。
+    const tmpPort = await new Promise<number>((resolve) => {
+      const probe = new net.Server();
+      probe.listen(0, "127.0.0.1", () => {
+        const addr = probe.address();
+        probe.close(() => resolve(typeof addr === "object" && addr ? addr.port : 0));
+      });
+    });
+    const downAtCallback: boolean[] = [];
+    const dead = new RemoteMuxTransport(`http://127.0.0.1:${tmpPort}`, {
+      backoffBaseMs: 30,
+      backoffMaxMs: 200,
+      cookieHeader: () => Promise.resolve(FIXED_COOKIE),
+      onState: () => downAtCallback.push(dead.serviceDown),
+    });
+    dead.start();
+    await waitFor(() => dead.serviceDown, 2000, "serviceDown");
+    await waitFor(() => downAtCallback.includes(true), 2000, "带 serviceDown=true 的状态通知");
+    dead.stop();
+  });
+
   it("backoffDelay 是指数增长并封顶的纯函数", () => {
     expect(backoffDelay(1, 100, 1000)).toBe(100);
     expect(backoffDelay(2, 100, 1000)).toBe(200);

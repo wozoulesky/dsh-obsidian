@@ -376,7 +376,12 @@ export class RemoteMuxTransport {
           /* close 事件随后触发；记录 ECONNREFUSED 供 close 路径选择退避策略（服务未启动时固定短间隔轮询） */
           if (err && typeof err === "object" && (err as { code?: string }).code === "ECONNREFUSED") {
             this.lastRefused = true;
+            const firstRefusalSinceOpen = !this.refusedSinceOpen;
             this.refusedSinceOpen = true;
+            // 状态值没变（仍是 reconnecting），但状态栏取词所依据的原因变了：必须绕过去重再通知一次。
+            // 否则「DSH 未运行（连接被拒绝）」永远显示不出来——真机复现：杀入口 35 秒后状态栏仍停在
+            // 「重连中…」，而用户需要的是「未运行」这条可执行结论。
+            if (firstRefusalSinceOpen) this.notifyState();
           }
         });
       })();
@@ -478,6 +483,18 @@ export class RemoteMuxTransport {
       this.lastState = state;
       this.onState?.(state);
     }
+  }
+
+  /**
+   * 强制再通知一次「当前状态」。
+   *
+   * 用途：**状态值没变、但派生 UI 的依据变了**。目前唯一的场景是 `refusedSinceOpen` 由 false 翻到 true——
+   * 状态仍是 `reconnecting`，可状态栏要靠 `serviceDown` 才能在「重连中…」和「DSH 未运行（连接被拒绝）」
+   * 之间取词。走 `emitState` 会被去重吞掉，状态栏就永远停在含糊的那句上。
+   * `onState` 的消费方按「状态字符串」判断（只有 `connected` 分支有副作用），重复收到同一个值是安全的。
+   */
+  private notifyState(): void {
+    this.onState?.(this.lastState ?? "reconnecting");
   }
 }
 
