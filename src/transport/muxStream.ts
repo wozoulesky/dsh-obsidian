@@ -164,6 +164,8 @@ export class RemoteMuxTransport {
   private lastState: MuxState | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingConnect: Promise<WebSocket> | null = null;
+  /** 与 pendingConnect 配对的唯一标识；finish() 用它判断自己是否是当前在途连接（避免 TDZ）。 */
+  private pendingToken: object | null = null;
   private generation = 0;
   private readonly streams = new Map<string, StreamInbox>();
   private readonly backoffBaseMs: number;
@@ -214,7 +216,11 @@ export class RemoteMuxTransport {
     if (this.stopped) this.stopped = false;
     if (!this.focusCleanup) this.installFocusReconnect(); // 渲染进程挂失焦重连兜底（Node 测试环境 window 为测试注入的别名）
     if (this.socket?.readyState === WS_OPEN || this.pendingConnect) return;
-    void this.connect().catch(() => {
+    // 必须走 waitForSocket()：它会把这次尝试登记进 pendingConnect。
+    // 若直接 connect()，紧随其后的 open() → waitForSocket() 会看到 pendingConnect 为空，
+    // 于是再发一次连接 → 双连 → 服务端帧回到另一条 socket，被 receive() 的
+    // `this.socket !== socket` 守卫静默丢弃（表现为流永远收不到数据）。
+    void this.waitForSocket().catch(() => {
       /* 失败已由 close 路径调度退避重试 */
     });
   }
@@ -232,6 +238,7 @@ export class RemoteMuxTransport {
     const socket = this.socket;
     this.socket = null;
     this.pendingConnect = null;
+    this.pendingToken = null;
     this.failAll(new RemoteStreamCarrierError("api gateway: Remote stream transport stopped"));
     socket?.close(1000, "disposed");
   }
@@ -307,12 +314,16 @@ export class RemoteMuxTransport {
   private waitForSocket(): Promise<WebSocket> {
     if (this.socket?.readyState === WS_OPEN) return Promise.resolve(this.socket);
     if (this.stopped) return Promise.reject(new RemoteStreamCarrierError("api gateway: Remote stream transport disposed"));
-    if (!this.pendingConnect) this.pendingConnect = this.connect();
+    if (!this.pendingConnect) {
+      const token = {};
+      this.pendingToken = token;
+      this.pendingConnect = this.connect(token);
+    }
     return this.pendingConnect;
   }
 
   /** 建立一次物理连接（带 Cookie 握手头）；失败由 close 路径调度退避重试。 */
-  private connect(): Promise<WebSocket> {
+  private connect(attemptToken: object = {}): Promise<WebSocket> {
     const gen = ++this.generation;
     this.emitState("reconnecting");
     const promise = new Promise<WebSocket>((resolve, reject) => {
@@ -320,7 +331,14 @@ export class RemoteMuxTransport {
       const finish = (fn: () => void) => {
         if (settled) return;
         settled = true;
-        if (this.pendingConnect === promise) this.pendingConnect = null;
+        // 不能写成 `this.pendingConnect === promise`：`finish` 可能在下面这行 `const promise`
+        // 初始化完成之前就被同步调用（例如 `new WebSocket()` 同步抛错），此时访问 `promise`
+        // 会抛 TDZ 的 ReferenceError，把真正的原因（URL 非法等）掩盖掉。
+        // 改用本次尝试独有的 token 比较，无 TDZ 风险。
+        if (this.pendingToken === attemptToken) {
+          this.pendingConnect = null;
+          this.pendingToken = null;
+        }
         fn();
       };
       /** 无 socket 的失败路径：拒绝在途等待者并调度退避重试（凭据稍后可能出现，DshCookieAuth 失败后自动重读）。 */

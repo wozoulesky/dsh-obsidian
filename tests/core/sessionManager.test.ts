@@ -819,3 +819,57 @@ describe("SessionManager TASK-030（附件·命令·目标）", () => {
   });
 });
 
+
+/**
+ * P1-3：底层错误国际化。session 层自己编写的错误/错误结果必须带**稳定错误码**，
+ * 并对英文用户给出**英文兜底 message**（服务端原文仍是原样透传，不在此列）。
+ */
+describe("本地错误码 + 英文兜底（P1-3）", () => {
+  /** 汉字扫描：兜底 message 不得含中文。 */
+  const HAN = /[\u4e00-\u9fff]/u;
+
+  /** 断言 promise 以带期望 code 的错误拒绝，且 message 非空、纯英文。 */
+  async function expectCodedRejection(p: Promise<unknown>, code: string): Promise<void> {
+    let err: unknown;
+    try {
+      await p;
+    } catch (e) {
+      err = e;
+    }
+    expect(err, `expected rejection with code ${code}`).toBeDefined();
+    const e = err as { code?: string; message?: string };
+    expect(e.code).toBe(code);
+    expect(typeof e.message).toBe("string");
+    expect((e.message ?? "").length).toBeGreaterThan(0);
+    expect(e.message).not.toMatch(HAN);
+  }
+
+  it("follow 流在首帧前结束 → code = session/follow-ended-before-first-frame + 英文兜底", async () => {
+    const stream = makeStream<SessionFollowFrame>();
+    const { manager } = makeManager({ openStream: async () => stream.iterator });
+    const p = manager.openSession("vault-1");
+    stream.end();
+    await expectCodedRejection(p, "session/follow-ended-before-first-frame");
+    expect(manager.currentId).toBeUndefined();
+  });
+
+  it("follow 首帧不是 snapshot → code = session/follow-first-frame-not-snapshot + 英文兜底", async () => {
+    const stream = makeStream<SessionFollowFrame>();
+    const { manager } = makeManager({ openStream: async () => stream.iterator });
+    const p = manager.openSession("vault-1");
+    stream.push(eventFrame(1));
+    await expectCodedRejection(p, "session/follow-first-frame-not-snapshot");
+    expect(manager.currentId).toBeUndefined();
+  });
+
+  it("空内容 → code = invalid-content + 英文兜底（码不变，仅文案改英文）", async () => {
+    const { manager } = makeManager();
+    const res = await manager.promptContent("s1", []);
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error.code).toBe("invalid-content"); // 既有码保持稳定
+      expect(res.error.message.length).toBeGreaterThan(0);
+      expect(res.error.message).not.toMatch(HAN);
+    }
+  });
+});

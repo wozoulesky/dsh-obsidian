@@ -16,6 +16,35 @@ import { truncate, truncateTail } from "./prompts";
 /** i18n 取词函数签名（与 `I18n.t` 一致；用回调注入以免本模块依赖具体实现）。 */
 export type Translate = (key: string, params?: Record<string, string | number>) => string;
 
+/**
+ * 回合异常收尾（`turn/end` reason ≠ completed）→ 用户可见提示。
+ *
+ * DSH 的 reason 六种（`dsh-agent/lib/types/consumed-work.js` 的 accountsForClaim）：
+ * `completed | blocked | aborted | interrupted | error | max-tokens`。
+ * 其中只有 `error` 有服务端正文（由 ErrorNode 承载），其余都不带任何原因字段
+ * （pre-step 的 reject 就只是 `{kind:'reject'}`），所以只能按 kind 给固定措辞。
+ *
+ * `blocked` 是最要紧的一条：pre-step 被策略 gate 拒绝（典型：会话已归档），
+ * 服务端连请求都不发、消息被丢弃、工作永远不会执行，**但 `prompt` 仍返回 accepted**。
+ * 不提示的话用户看到的就是「消息发出去就消失了」。
+ *
+ * 未知 kind 走带 `{reason}` 的兜底，保证 DSH 将来新增收尾类型时不会退化成静默。
+ */
+export function turnNoticeText(reason: string, t: Translate): string {
+  switch (reason) {
+    case "blocked":
+      return t("chat.turnBlocked");
+    case "aborted":
+      return t("chat.turnAborted");
+    case "interrupted":
+      return t("chat.turnInterrupted");
+    case "max-tokens":
+      return t("chat.turnMaxTokens");
+    default:
+      return t("chat.turnEndedUnexpectedly", { reason });
+  }
+}
+
 /** 待办三态图标（官方 UI 语义：pending 未开始 / in_progress 进行中 / completed 已完成）。 */
 export const TODO_GLYPH: Record<TodoItem["status"], string> = {
   pending: "○",

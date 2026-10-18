@@ -106,6 +106,25 @@ class FakeEl {
   pressEnter(): void {
     this.dispatch("keydown", { key: "Enter", shiftKey: false, preventDefault: () => undefined });
   }
+
+  /** 按 Enter，但事件处于 IME 组合输入中（isComposing=true）。 */
+  pressEnterWhileComposing(): void {
+    this.dispatch("keydown", {
+      key: "Enter",
+      shiftKey: false,
+      isComposing: true,
+      preventDefault: () => undefined,
+    });
+  }
+
+  /** 走 compositionstart/end 的真实顺序（某些平台 keydown 上 isComposing 已回落）。 */
+  startComposition(): void {
+    this.dispatch("compositionstart");
+  }
+
+  endComposition(): void {
+    this.dispatch("compositionend");
+  }
 }
 
 interface SetupOptions {
@@ -483,6 +502,49 @@ describe("图片附件（TASK-030）", () => {
     textarea.pressEnter();
     await flush();
     expect(sent).toHaveLength(0);
+  });
+
+  /**
+   * 回归：中文/日文输入法用户按 Enter 是「确认候选词」，不是「发送」。
+   * 缺 `isComposing` 守卫时，插件会把**未上屏的拼音/假名**当成正文发出去，
+   * 而且 textarea 已被清空——用户既发了错内容，又丢了正在打的字。
+   * 正确行为：组合输入中的 Enter 必须放行给输入法（不 preventDefault、不发送、不清空）。
+   */
+  it("IME 组合输入中按 Enter 不发送，也不清空输入框", async () => {
+    const sent: Array<{ text: string; images: unknown[] }> = [];
+    const { textarea } = attachSetup(undefined, async (text, images) => {
+      sent.push({ text, images });
+      return true;
+    });
+
+    textarea.type("ni hao"); // 尚未上屏的拼音
+    textarea.pressEnterWhileComposing();
+    await flush();
+
+    expect(sent).toHaveLength(0); // 不得发送
+    expect(textarea.value).toBe("ni hao"); // 不得清空：用户还在选词
+  });
+
+  it("compositionstart/end 跟踪：组合期间的 Enter 被拦、结束后 Enter 正常发送", async () => {
+    const sent: Array<{ text: string; images: unknown[] }> = [];
+    const { textarea } = attachSetup(undefined, async (text, images) => {
+      sent.push({ text, images });
+      return true;
+    });
+
+    textarea.type("nihao");
+    textarea.startComposition();
+    // keydown 上不带 isComposing（模拟 commit 那一拍属性已回落），仅靠 composition 标记拦
+    textarea.pressEnter();
+    await flush();
+    expect(sent).toHaveLength(0);
+
+    textarea.endComposition();
+    textarea.type("你好"); // 上屏后
+    textarea.pressEnter();
+    await flush();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].text).toBe("你好");
   });
 
   it("超过张数上限 → 不加 chip（上限来自会话 imageLimits 投影）", async () => {

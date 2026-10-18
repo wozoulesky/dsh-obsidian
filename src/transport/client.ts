@@ -43,12 +43,29 @@ import {
   type SessionSelectModelRequest,
   type SessionSelectModelValue,
 } from "./types";
-import { DshAuthError, type DshCookieAuth } from "./auth";
+import { AUTH_ERROR_CODES, DshAuthError, type DshCookieAuth } from "./auth";
 import { RemoteMuxTransport, type RemoteMuxTransportOptions } from "./muxStream";
 import { clearTimer, setTimer } from "../utils/timers";
 
+/**
+ * 传输层本地错误码（**稳定契约**：UI 按 code 映射 i18n 文案）。
+ * `message` 一律英文兜底——底层日志/未映射路径不会泄漏中文给英文用户。
+ */
+export const TRANSPORT_ERROR_CODES = {
+  /** 硬超时（请求发出后无响应）。 */
+  timeout: "transport/timeout",
+  /** 非 2xx HTTP 状态码（DSH 明确拒绝；多为版本/路由不匹配）。 */
+  httpStatus: "transport/http-status",
+  /** 连接被对端中断/重置。 */
+  connectionFailed: "transport/connection-failed",
+  /** 其余本地传输异常归一化。 */
+  unexpected: "transport/unexpected",
+} as const;
+
+export type TransportErrorCode = (typeof TRANSPORT_ERROR_CODES)[keyof typeof TRANSPORT_ERROR_CODES];
+
 export class TransportFailure extends Error {
-  constructor(message: string, readonly cause?: unknown) {
+  constructor(readonly code: TransportErrorCode, message: string, readonly cause?: unknown) {
     super(message);
     this.name = "TransportFailure";
   }
@@ -75,7 +92,7 @@ export function postJson(url: string, body: string, timeoutMs: number, headers?:
     try {
       const u = new URL(url);
       const isHttps = u.protocol === "https:";
-      deadline = setTimer(() => fail(new TransportFailure(`timeout after ${timeoutMs}ms`)), timeoutMs);
+      deadline = setTimer(() => fail(new TransportFailure(TRANSPORT_ERROR_CODES.timeout, `timeout after ${timeoutMs}ms`)), timeoutMs);
       const req = (isHttps ? https : http).request(
         {
           hostname: u.hostname,
@@ -99,21 +116,21 @@ export function postJson(url: string, body: string, timeoutMs: number, headers?:
             if (res.statusCode !== undefined && res.statusCode >= 200 && res.statusCode < 300) {
               resolve(text);
             } else {
-              reject(new TransportFailure(`HTTP ${String(res.statusCode)} for ${url}`));
+              reject(new TransportFailure(TRANSPORT_ERROR_CODES.httpStatus, `HTTP ${String(res.statusCode)} for ${url}`));
             }
           });
-          res.on("aborted", () => fail(new TransportFailure(`connection aborted for ${url}`)));
-          res.on("close", () => fail(new TransportFailure(`connection closed prematurely for ${url}`)));
-          res.on("error", (err) => fail(new TransportFailure(err.message, err)));
+          res.on("aborted", () => fail(new TransportFailure(TRANSPORT_ERROR_CODES.connectionFailed, `connection aborted for ${url}`)));
+          res.on("close", () => fail(new TransportFailure(TRANSPORT_ERROR_CODES.connectionFailed, `connection closed prematurely for ${url}`)));
+          res.on("error", (err) => fail(new TransportFailure(TRANSPORT_ERROR_CODES.connectionFailed, err.message, err)));
         }
       );
-      req.setTimeout(timeoutMs, () => req.destroy(new TransportFailure(`timeout after ${timeoutMs}ms`)));
-      req.on("error", (err) => fail(new TransportFailure(err.message, err)));
+      req.setTimeout(timeoutMs, () => req.destroy(new TransportFailure(TRANSPORT_ERROR_CODES.timeout, `timeout after ${timeoutMs}ms`)));
+      req.on("error", (err) => fail(new TransportFailure(TRANSPORT_ERROR_CODES.connectionFailed, err.message, err)));
       req.write(body);
       req.end();
     } catch (err) {
       // new URL / http.request 对非法地址会同步抛错：转成 TransportFailure 而不是让调用方裸抛
-      fail(new TransportFailure(err instanceof Error ? err.message : String(err), err));
+      fail(new TransportFailure(TRANSPORT_ERROR_CODES.unexpected, err instanceof Error ? err.message : String(err), err));
     }
   });
 }
@@ -172,7 +189,9 @@ export class DshClient {
       headers = await this.authHeader();
     } catch (err) {
       // 认证失败（DshAuthError）明确传播，不静默吞：上层据此提示「DSH 凭据不可读」
-      throw err instanceof DshAuthError ? err : new DshAuthError(err instanceof Error ? err.message : String(err), err);
+      throw err instanceof DshAuthError
+        ? err
+        : new DshAuthError(AUTH_ERROR_CODES.unexpected, err instanceof Error ? err.message : String(err), err);
     }
     const text = await postJson(`${this.opts.baseUrl}/api/${method}`, JSON.stringify(request), timeoutMs, headers);
     let full: unknown;
@@ -181,16 +200,16 @@ export class DshClient {
     } catch {
       return {
         ok: false,
-        error: { code: "internal", message: "DSH 返回了无法解析的响应" },
+        error: { code: "transport/malformed-response", message: "DSH returned an unparseable response" },
       };
     }
     if (!isServerResponse(full)) {
-      return { ok: false, error: { code: "internal", message: "DSH 响应信封格式非法" } };
+      return { ok: false, error: { code: "transport/invalid-envelope", message: "DSH response envelope is malformed" } };
     }
     if (full.rpcId !== rpcId) {
       return {
         ok: false,
-        error: { code: "internal", message: `rpcId 不匹配：发送 ${rpcId}，收到 ${full.rpcId}` },
+        error: { code: "transport/rpc-id-mismatch", message: `rpcId mismatch: sent ${rpcId}, received ${full.rpcId}` },
       };
     }
     const result = full.result as RpcResult<T>;
@@ -198,7 +217,7 @@ export class DshClient {
       const err = (result as { error?: { code?: unknown; message?: unknown } }).error;
       if (!err || typeof err.message !== "string" || typeof err.code !== "string") {
         // 畸形错误结果（线上契约漂移）归一化，避免上层直接访问 error.message 崩溃
-        return { ok: false, error: { code: "internal", message: "DSH 返回了非法的错误结果" } };
+        return { ok: false, error: { code: "transport/invalid-error-shape", message: "DSH returned an invalid error result" } };
       }
     }
     return result;

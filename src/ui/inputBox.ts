@@ -37,6 +37,8 @@ export class DshInputBox {
   private chipsEl!: HTMLElement;
   /** 已渲染的 chip 数量：为 0 且无待清理项时完全不碰 DOM（也避免无谓的 empty()）。 */
   private renderedChips = 0;
+  /** IME 组合输入中（compositionstart → true，compositionend → false）：此期间 Enter 归输入法。 */
+  private composing = false;
 
   constructor(
     private container: HTMLElement,
@@ -51,6 +53,15 @@ export class DshInputBox {
     this.textarea = this.wrap.createEl("textarea", { cls: "dsh-input", attr: { placeholder: this.runtime.i18n.t("input.placeholder") } });
     this.textarea.addEventListener("keydown", (e) => {
       void this.onKeydown(e);
+    });
+    // IME 组合输入状态跟踪。优先用标准的 compositionstart/end：比逐个判断 keydown
+    // 事件上的 isComposing 更可靠（某些平台在 commit 那一拍 isComposing 已回落，
+    // 而 compositionend 顺序稳定）。这里只做标记，实际拦截在 onKeydown。
+    this.textarea.addEventListener("compositionstart", () => {
+      this.composing = true;
+    });
+    this.textarea.addEventListener("compositionend", () => {
+      this.composing = false;
     });
     this.textarea.addEventListener("input", () => this.scheduleSuggest());
     this.buildAttachBar();
@@ -153,6 +164,12 @@ export class DshInputBox {
   }
 
   private async onKeydown(e: KeyboardEvent): Promise<void> {
+    // IME（中文/日文输入法）组合输入中：Enter 是「确认候选词」，绝不能被当成发送/接受联想。
+    // 缺这道守卫的后果是真实事故级的——用户按 Enter 上屏时会发送**未上屏的拼音**，
+    // 且 textarea 已被清空，用户既发错内容又丢了正在打的字。
+    // `isComposing` 是标准属性；同时用 compositionstart/end 跟踪的组合态兜底
+    // （部分平台在 commit 那一拍 isComposing 已回落，而 compositionend 顺序更稳定）。
+    if (this.composing || e.isComposing) return;
     if (this.suggestEl) {
       if (e.key === "ArrowDown") {
         e.preventDefault();

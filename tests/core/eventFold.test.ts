@@ -129,6 +129,50 @@ describe("foldEvent", () => {
     expect(view.nodes.at(-1)).toMatchObject({ kind: "error", text: "模型挂了" });
   });
 
+  /**
+   * 回归（真机发现）：`turn/end` 的 reason 除 `error` 外还有
+   * `completed | blocked | aborted | interrupted | max-tokens | forked`
+   * （见 DSH `dsh-agent/lib/types/consumed-work.js` 的 accountsForClaim）。
+   *
+   * 之前只处理 `error`，其余情况**不产生任何节点**。真机后果：给一个已归档/不可执行的
+   * 旧会话发消息，`prompt` 返回 accepted:true，服务端立刻 `turn/end {kind:"blocked"}`
+   * （pre-step 被 gate 拒绝、消息被丢弃、工作永远不会执行），而界面上那条消息
+   * 发出去就消失了，用户完全不知道发生了什么。
+   *
+   * 修复：非 completed 的异常收尾必须留下可见节点，且要能区分「出错」与「没执行」。
+   */
+  it("turn/end 为 blocked → 追加 notice 节点（回合未执行，用户必须知情）", () => {
+    const view = createSessionView("s1");
+    foldEvent(view, ev("turn/start", 1, { turn: 1 }));
+    foldEvent(view, ev("turn/end", 2, { turn: 1, reason: { kind: "blocked" } }));
+    const node = view.nodes.at(-1);
+    expect(node).toMatchObject({ kind: "notice", reason: "blocked" });
+    expect(view.running).toBe(false);
+  });
+
+  it("turn/end 为 aborted / interrupted / max-tokens → 也留下 notice 节点", () => {
+    for (const reason of ["aborted", "interrupted", "max-tokens"] as const) {
+      const view = createSessionView("s1");
+      foldEvent(view, ev("turn/start", 1, { turn: 1 }));
+      foldEvent(view, ev("turn/end", 2, { turn: 1, reason: { kind: reason } }));
+      expect(view.nodes.at(-1)).toMatchObject({ kind: "notice", reason });
+    }
+  });
+
+  it("turn/end 为 completed → 不得追加 notice（正常收尾不留噪音）", () => {
+    const view = createSessionView("s1");
+    foldEvent(view, ev("turn/start", 1, { turn: 1 }));
+    foldEvent(view, ev("turn/end", 2, { turn: 1, reason: { kind: "completed" } }));
+    expect(view.nodes.filter((n) => n.kind === "notice")).toHaveLength(0);
+  });
+
+  it("turn/end 缺 reason → 视作正常收尾，不追加 notice（老服务端/畸形帧不制造噪音）", () => {
+    const view = createSessionView("s1");
+    foldEvent(view, ev("turn/start", 1, { turn: 1 }));
+    foldEvent(view, ev("turn/end", 2, { turn: 1 }));
+    expect(view.nodes.filter((n) => n.kind === "notice")).toHaveLength(0);
+  });
+
   it("同一回合多步骤生成多个 assistant 节点", () => {
     const view = createSessionView("s1");
     foldEvent(view, ev("assistant/chunk", 1, { turn: 1, step: 1, chunk: { type: "text-delta", index: 0, text: "第一步" } }));
@@ -190,5 +234,32 @@ describe("foldEvent", () => {
     if (node.kind === "assistant") {
       expect(node.toolCards[0]).toMatchObject({ id: "c9", name: "bash", status: "running" });
     }
+  });
+});
+
+/**
+ * P1-3：底层错误国际化。服务端错误正文原样透传（不翻译服务端文案），
+ * 但**本地兜底文案**必须是英文，避免英文用户看到中文 `未知错误`。
+ * 渲染时的本地化前缀由 UI 层 `chat.turnError` 负责。
+ */
+describe("错误节点兜底文案（P1-3）", () => {
+  /** 汉字扫描：本地兜底文案不得含中文。 */
+  const HAN = /[\u4e00-\u9fff]/u;
+
+  it("turn/end 错误缺少服务端正文 → 兜底文案为英文且非空", () => {
+    const view = createSessionView("s1");
+    foldEvent(view, ev("turn/end", 1, { turn: 1, reason: { kind: "error" } }));
+    const node = view.nodes.at(-1);
+    expect(node).toMatchObject({ kind: "error" });
+    const text = (node as { text: string }).text;
+    expect(typeof text).toBe("string");
+    expect(text.length).toBeGreaterThan(0);
+    expect(text).not.toMatch(HAN);
+  });
+
+  it("服务端错误正文仍是原样透传（不因兜底改动被覆盖）", () => {
+    const view = createSessionView("s1");
+    foldEvent(view, ev("turn/end", 1, { turn: 1, reason: { kind: "error", error: { message: "模型挂了" } } }));
+    expect(view.nodes.at(-1)).toMatchObject({ kind: "error", text: "模型挂了" });
   });
 });

@@ -136,6 +136,14 @@ export interface CommandNode {
   rev: number;
 }
 
+/**
+ * 回合错误正文的**本地兜底**文案（英文：底层不 import i18n，语言由 UI 层决定）。
+ *
+ * 只在服务端 `turn/end` 没带 `reason.error.message` 时使用——服务端正文永远原样透传，
+ * 不做任何改写。UI 层渲染时统一套 `chat.turnError` 前缀完成本地化。
+ */
+export const UNKNOWN_TURN_ERROR_TEXT = "Unknown error";
+
 export interface ErrorNode {
   kind: "error";
   id: string;
@@ -145,7 +153,29 @@ export interface ErrorNode {
   rev: number;
 }
 
-export type ViewNode = UserNode | AssistantNode | CommandNode | ErrorNode;
+/**
+ * 回合异常收尾但**不是错误**时留下的提示节点。
+ *
+ * DSH `turn/end` 的 reason 有六种（`dsh-agent/lib/types/consumed-work.js` 的 accountsForClaim）：
+ * `completed | blocked | aborted | interrupted | error | max-tokens`。
+ * 其中 `blocked` 表示 pre-step 被策略 gate 拒绝（典型：给已归档会话发消息），
+ * 服务端连请求都不发、消息被丢弃、工作永远不会执行——**但 `prompt` 仍返回 accepted:true**。
+ * 若不留节点，用户看到的就是"消息发出去就消失了"，无从判断。
+ *
+ * reason 本身不携带原因文本（reject 只有 `{kind:'reject'}`），所以这里只记 kind，
+ * 具体文案由 UI 层按 kind 查 i18n（与 ErrorNode 同一分层原则：核心层不依赖 UI 文案）。
+ */
+export interface NoticeNode {
+  kind: "notice";
+  id: string;
+  /** 服务端 `turn/end` 的 reason.kind（稳定小写连字符标识）。 */
+  reason: string;
+  seq: number;
+  /** 渲染签名版本号：见 UserNode.rev。 */
+  rev: number;
+}
+
+export type ViewNode = UserNode | AssistantNode | CommandNode | ErrorNode | NoticeNode;
 
 export interface SessionView {
   sessionId: string;
@@ -388,7 +418,25 @@ export function foldEvent(view: SessionView, event: SessionEvent): void {
       const reason = data.reason as { kind?: string; error?: { message?: string; code?: string } };
       if (reason?.kind === "error") {
         // 只存服务端错误正文；本地化前缀由 UI 层渲染（见 chatView）。
-        view.nodes.push({ kind: "error", id: `err-${event.seq}`, text: reason.error?.message ?? "未知错误", seq: event.seq, rev: 0 });
+        view.nodes.push({
+          kind: "error",
+          id: `err-${event.seq}`,
+          // 服务端正文原样透传；缺失时才用本地英文兜底（本地化前缀由 UI 层渲染，见 chatView）
+          text: reason.error?.message ?? UNKNOWN_TURN_ERROR_TEXT,
+          seq: event.seq,
+          rev: 0,
+        });
+      } else if (reason?.kind !== undefined && reason.kind !== "completed") {
+        // 非 error 的异常收尾（blocked / aborted / interrupted / max-tokens / forked）：
+        // 回合没正常跑完，必须留下可见痕迹。真机上 blocked 表现为「消息发出后凭空消失」，
+        // 用户无法判断是没发出去、卡住了、还是被拒了。文案由 UI 层按 reason 查 i18n。
+        view.nodes.push({
+          kind: "notice",
+          id: `notice-${event.seq}`,
+          reason: reason.kind,
+          seq: event.seq,
+          rev: 0,
+        });
       }
       const node = lastAssistant(view);
       if (node) {

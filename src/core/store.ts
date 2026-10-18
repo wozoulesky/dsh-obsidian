@@ -175,10 +175,13 @@ export class SessionStore {
         // 队列只作用于帧开始前已存在的视图：投影允许播种（会物化未打开会话），
         // 若按播种后的视图集合处理队列，未打开会话也会被队列物化（违反旧语义）。
         const existing = new Set(this.views.keys());
-        for (const [sessionId, block] of Object.entries(frame.value.projections)) {
+        // DSH 0.1.7-rc.1 起 baseline 只下发 projections，queues/jobs 已移除。
+        // 必须容错取默认值：否则 Object.entries(undefined) 抛 TypeError，
+        // 且会连带跳过本帧剩余逻辑与 notify()（数据进库但 UI 不重绘）。
+        for (const [sessionId, block] of Object.entries(frame.value.projections ?? {})) {
           changed = this.applyProjectionsBlock(sessionId, block) || changed;
         }
-        for (const [sessionId, items] of Object.entries(frame.value.queues)) {
+        for (const [sessionId, items] of Object.entries(frame.value.queues ?? {})) {
           if (!existing.has(sessionId)) continue;
           const view = this.views.get(sessionId) as SessionView;
           view.queueItems = items;

@@ -100,6 +100,99 @@ function serverSend(ws: WebSocket, frame: Record<string, unknown>): void {
   ws.send(JSON.stringify(frame));
 }
 
+describe("RemoteMuxTransport 物理连接不变量", () => {
+  /**
+   * 回归：`connect()` 内 `finish()` 闭包引用了 `const promise`，而 `finish` 可能在
+   * `promise` 初始化完成之前被同步调用 —— 典型触发是 `new WebSocket()` 抛同步异常
+   * （baseUrl 非法 / URL 拼装出错）。此时 `this.pendingConnect === promise` 会执行到
+   * 「访问尚未初始化的 const」→ ReferenceError: Cannot access 'promise' before initialization。
+   *
+   * 这个错误比原始失败更糟：它替换掉了真正的原因（URL 非法），让排查方向跑偏。
+   * 正确行为：连接尝试被拒绝、pendingConnect 被清空、可再次重试，且不得抛 ReferenceError。
+   */
+  it("new WebSocket() 同步抛错时不触发 TDZ ReferenceError，且允许后续重试", async () => {
+    // 不注入 cookieHeader/auth：this.cookie 为 undefined，connect() 会**同步**走到
+    // new WebSocket()，这正是 finish() 早于 const promise 初始化的唯一路径。
+    //
+    // 可观测的确定性差异：TDZ 版里 finish() 在给 pendingConnect 清空之前就抛了，
+    // 于是 promise 永不结算、pendingConnect 被永久占位 —— 后续 open() 会一直挂住，
+    // 插件从此再也无法重连（比原始「URL 非法」错误严重得多）。
+    // 修复后：错误路径干净落地，open() 拿到 rejection 而不是永久挂起。
+    const transport = new RemoteMuxTransport("not-a-url", {
+      backoffBaseMs: 20,
+      backoffMaxMs: 100,
+      onState: () => {},
+    });
+
+    // 先让一次连接尝试失败（同步抛错路径）
+    transport.start();
+    await new Promise((r) => setTimeout(r, 30));
+
+    // 关键断言：后续 open() 必须能落地（reject 或被重连打断），不能永久挂住。
+    // 用 Promise.race 给 1s 预算：TDZ 版会超时（= 挂住），修复版会很快 reject。
+    const iter = transport.open("session/follow", {})[Symbol.asyncIterator]();
+    const outcome = await Promise.race([
+      iter.next().then(
+        () => "resolved",
+        () => "rejected" as const
+      ),
+      new Promise((r) => setTimeout(() => r("hung" as const), 1000)),
+    ]);
+
+    expect(outcome).not.toBe("hung"); // 永久挂住 = TDZ 回归
+    transport.stop();
+  });
+
+  /**
+   * 回归：start() 与 open() 并发时只能发起一次连接尝试。
+   *
+   * 历史缺陷：start() 直接调 connect() 却没把这次尝试登记进 pendingConnect，
+   * 于是紧随其后的 open() → streamIter() → waitForSocket() 看到 pendingConnect 为 null，
+   * 又发起第二次 connect()。服务端因此 accept 两条 WS：item 帧回到 socket A，
+   * 而 this.socket 指向 socket B，receive() 里的 `this.socket !== socket` 守卫把帧静默丢弃，
+   * 迭代器永远等不到数据（真实表现就是「open 发 open 帧」那条用例 15s 超时）。
+   *
+   * 断言的确定性来源：`connect()` 每次进入都会先调一次 cookieHeader（见 muxStream.ts:336），
+   * 所以「cookieHeader 被调用几次」== 「发起了几次连接尝试」，不依赖两个 socket 谁先握手成功。
+   * 这里让 cookieHeader 先挂起，把窗口撑开，再在挂起期间调用 open()。
+   */
+  it("start() 与 open() 并发时只发起一次连接尝试（防双连丢帧）", async () => {
+    let releaseCookie: (() => void) | null = null;
+    const cookieGate = new Promise<void>((resolve) => {
+      releaseCookie = resolve;
+    });
+    let cookieCalls = 0;
+    const { transport } = makeTransport({
+      cookieHeader: async () => {
+        cookieCalls += 1;
+        await cookieGate;
+        return FIXED_COOKIE;
+      },
+    });
+
+    transport.start();
+    await new Promise((r) => setTimeout(r, 20)); // 让 start() 的 connect() 走到 await cookie()
+    expect(cookieCalls).toBe(1);
+
+    // 连接仍在挂起（pendingConnect 应为非 null）——此时 open() 不得再发一次连接
+    const iter = transport.open<{ type: "snapshot" }>("session/follow", { request: {} })[Symbol.asyncIterator]();
+    const first = iter.next();
+    await new Promise((r) => setTimeout(r, 20));
+
+    // 关键断言：一次 start + 一次 open == 一次连接尝试
+    expect(cookieCalls).toBe(1);
+
+    releaseCookie!();
+    await waitFor(() => received.some((m) => m.type === "open"), 2000, "open frame");
+
+    const openFrame = received.find((m) => m.type === "open") as Record<string, unknown>;
+    serverSend(sockets[0], { type: "item", streamId: openFrame.streamId, value: { type: "snapshot" } });
+    await expect(first).resolves.toEqual({ done: false, value: { type: "snapshot" } });
+    expect(sockets.length).toBe(1);
+    transport.stop();
+  });
+});
+
 describe("RemoteMuxTransport 帧协议", () => {
   it("open 发 open 帧（endpoint/payload），收 item 帧产出 value", async () => {
     const { transport } = makeTransport();

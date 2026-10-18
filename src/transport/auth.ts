@@ -58,9 +58,53 @@ function loadOs(): OsLike {
   return require("os") as OsLike;
 }
 
-/** DSH 凭据读取 / cookie 签名失败（供上层 UI 提示「DSH 凭据不可读」）。 */
+/**
+ * 认证层本地错误码（**稳定契约**：UI 层按 code 查自己的 i18n 文案，不得随意改名）。
+ *
+ * 为什么不是「直接写中文」：语言在运行时才由 `main.ts` 决定（`src/i18n.ts`），
+ * 而 transport/core 层不 import i18n 单例（否则核心层反向依赖 UI 文案）。
+ * 因此核心层统一给「稳定 code + 英文兜底 message」：UI 能映射就用本地文案，
+ * 没映射（或日志、控制台、错误上报）也至少是英文，不会让英文用户看到中文。
+ *
+ * 命名沿用 DSH 线上错误码的 `域/短横线短语` 风格（如 `session/not-found`）。
+ * message 里刻意保留 "credentials" 一词：`diagnose.classifyDshFailure()` 靠
+ * `/凭据|credentials/i` 把凭据类故障归类为 authFailed，改文案不得丢掉该线索。
+ */
+export const AUTH_ERROR_CODES = {
+  /** secret 不是合法 base64url（含 canonical 往返校验失败）。 */
+  secretInvalid: "auth/secret-invalid",
+  /** baseUrl 无法按 URL 解析。 */
+  baseUrlInvalid: "auth/base-url-invalid",
+  /** baseUrl 协议不是 http/https。 */
+  baseUrlSchemeInvalid: "auth/base-url-scheme-invalid",
+  /** 凭据文件里没有目标 record（DSH 未初始化 browser session）。 */
+  credentialsRecordMissing: "auth/credentials-record-missing",
+  /** record 存在但缺少 payload.secret。 */
+  credentialsSecretMissing: "auth/credentials-secret-missing",
+  /** secret 解码后长度不是 32 字节。 */
+  secretLengthInvalid: "auth/secret-length-invalid",
+  /** 拿不到用户主目录（homedir 为空或抛错）。 */
+  homeUnresolved: "auth/home-unresolved",
+  /** 凭据文件读不出来（不存在 / 无权限 / IO 错误）。 */
+  credentialsUnreadable: "auth/credentials-unreadable",
+  /** 凭据文件 stat 失败（拿不到 mtime）。 */
+  credentialsStatUnreadable: "auth/credentials-stat-unreadable",
+  /** 凭据路径存在但不是普通文件。 */
+  credentialsNotAFile: "auth/credentials-not-a-file",
+  /** 非 DshAuthError 的异常归一化（cookieHeader 注入实现抛了别的东西）。 */
+  unexpected: "auth/unexpected",
+} as const;
+
+export type DshAuthErrorCode = (typeof AUTH_ERROR_CODES)[keyof typeof AUTH_ERROR_CODES];
+
+/**
+ * DSH 凭据读取 / cookie 签名失败（供上层 UI 提示「DSH 凭据不可读」）。
+ *
+ * `code` 是给 UI 的稳定契约；`message` 是**英文兜底**（非本地化文案）。
+ * 构造顺序 `(code, message, cause?)`：code 必填，避免新增抛点忘了给码。
+ */
 export class DshAuthError extends Error {
-  constructor(message: string, readonly cause?: unknown) {
+  constructor(readonly code: DshAuthErrorCode, message: string, readonly cause?: unknown) {
     super(message);
     this.name = "DshAuthError";
   }
@@ -74,13 +118,13 @@ export function encodeBase64Url(data: Buffer): string {
 /** 对 base64url 字符串解码（签名 secret 使用；非法输入抛错）。 */
 export function decodeBase64Url(text: string): Buffer {
   if (!/^[A-Za-z0-9_-]*$/u.test(text) || text.length % 4 === 1) {
-    throw new DshAuthError("DSH 凭据 secret 不是合法的 base64url 字符串");
+    throw new DshAuthError(AUTH_ERROR_CODES.secretInvalid, "DSH credentials secret is not valid base64url");
   }
   const padding = "=".repeat((4 - (text.length % 4)) % 4);
   const decoded = Buffer.from(text.replace(/-/g, "+").replace(/_/g, "/") + padding, "base64");
   // 官方 decodeBase64Url 会校验 canonical 往返，这里同样防带 padding 位垃圾的输入
   if (encodeBase64Url(decoded) !== text) {
-    throw new DshAuthError("DSH 凭据 secret 不是合法的 base64url 字符串");
+    throw new DshAuthError(AUTH_ERROR_CODES.secretInvalid, "DSH credentials secret is not valid base64url");
   }
   return decoded;
 }
@@ -91,10 +135,13 @@ export function authorityOf(baseUrl: string): string {
   try {
     url = new URL(baseUrl);
   } catch {
-    throw new DshAuthError(`baseUrl 无法解析：${JSON.stringify(baseUrl)}`);
+    throw new DshAuthError(AUTH_ERROR_CODES.baseUrlInvalid, `baseUrl is not a parseable URL: ${JSON.stringify(baseUrl)}`);
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new DshAuthError(`baseUrl 必须是 http/https 地址：${JSON.stringify(baseUrl)}`);
+    throw new DshAuthError(
+      AUTH_ERROR_CODES.baseUrlSchemeInvalid,
+      `baseUrl must be an http/https address: ${JSON.stringify(baseUrl)}`
+    );
   }
   return url.host;
 }
@@ -166,7 +213,10 @@ export function extractSecretFromYaml(yamlText: string, recordKey: string = CRED
   // 记录头可能是缩进的（`records:` 下的 2 空格子键），按去尾空白后相等匹配
   const recordIndex = lines.findIndex((line) => line.trim() === `${recordKey}:`);
   if (recordIndex === -1) {
-    throw new DshAuthError(`DSH 凭据文件中没有 ${recordKey} 记录（DSH 未初始化浏览器会话凭据）`);
+    throw new DshAuthError(
+      AUTH_ERROR_CODES.credentialsRecordMissing,
+      `DSH credentials file has no ${recordKey} record (browser session credentials not initialized)`
+    );
   }
   const recordIndent = lines[recordIndex].length - lines[recordIndex].trimStart().length;
   // 记录块结束：下一个缩进 ≤ 记录头缩进的非空行（同级记录/上层键）
@@ -185,7 +235,10 @@ export function extractSecretFromYaml(yamlText: string, recordKey: string = CRED
     }
   }
   if (!keyFound || secret === undefined || secret === "") {
-    throw new DshAuthError(`DSH 凭据文件中 ${recordKey} 记录缺少 payload.secret`);
+    throw new DshAuthError(
+      AUTH_ERROR_CODES.credentialsSecretMissing,
+      `DSH credentials record ${recordKey} is missing payload.secret`
+    );
   }
   if (/^["']/u.test(secret)) {
     const unquoted = secret.replace(/^(["'])(.*)\1$/u, "$2");
@@ -193,7 +246,10 @@ export function extractSecretFromYaml(yamlText: string, recordKey: string = CRED
   }
   const key = decodeBase64Url(secret);
   if (key.length !== SECRET_BYTES) {
-    throw new DshAuthError(`DSH 凭据 secret 长度非法（期望 ${SECRET_BYTES} 字节，实际 ${key.length} 字节）`);
+    throw new DshAuthError(
+      AUTH_ERROR_CODES.secretLengthInvalid,
+      `DSH credentials secret has invalid length (expected ${SECRET_BYTES} bytes, got ${key.length} bytes)`
+    );
   }
   return key;
 }
@@ -244,10 +300,10 @@ export function defaultCredentialsPath(homedir?: () => string, dshHome?: string)
   try {
     userHome = (homedir ?? loadOs().homedir)();
   } catch (err) {
-    throw new DshAuthError("无法获取用户主目录（DSH 凭据位置未知）", err);
+    throw new DshAuthError(AUTH_ERROR_CODES.homeUnresolved, "Cannot resolve the user home directory (DSH credentials location unknown)", err);
   }
   if (!userHome) {
-    throw new DshAuthError("无法获取用户主目录（DSH 凭据位置未知）");
+    throw new DshAuthError(AUTH_ERROR_CODES.homeUnresolved, "Cannot resolve the user home directory (DSH credentials location unknown)");
   }
   return `${userHome.replace(/[\\/]+$/u, "")}/.dsh/.credentials.yaml`;
 }
@@ -288,7 +344,11 @@ export class DshCookieAuth {
           fs.readFile(path, "utf8", (err, data) => {
             if (err) {
               reject(
-                new DshAuthError(`无法读取 DSH 凭据文件 ${path}：${describeUnknown(err)}`, err)
+                new DshAuthError(
+                  AUTH_ERROR_CODES.credentialsUnreadable,
+                  `Cannot read DSH credentials file ${path}: ${describeUnknown(err)}`,
+                  err
+                )
               );
             } else {
               resolve(data ?? "");
@@ -300,10 +360,16 @@ export class DshCookieAuth {
           fs.stat(path, (err, stats) => {
             if (err || stats === undefined) {
               reject(
-                new DshAuthError(`无法读取 DSH 凭据文件 ${path} 的状态：${err instanceof Error ? err.message : String(err)}`, err)
+                new DshAuthError(
+                  AUTH_ERROR_CODES.credentialsStatUnreadable,
+                  `Cannot stat DSH credentials file ${path}: ${err instanceof Error ? err.message : String(err)}`,
+                  err
+                )
               );
             } else if (!stats.isFile()) {
-              reject(new DshAuthError(`DSH 凭据路径 ${path} 不是文件`));
+              reject(
+                new DshAuthError(AUTH_ERROR_CODES.credentialsNotAFile, `DSH credentials path ${path} is not a regular file`)
+              );
             } else {
               resolve(stats.mtimeMs);
             }
@@ -339,7 +405,16 @@ export class DshCookieAuth {
     } catch (err) {
       this.secret = undefined;
       this.lastReadFailed = true;
-      this.lastError = err instanceof DshAuthError ? err : new DshAuthError(err instanceof Error ? err.message : String(err), err);
+      this.lastError =
+        err instanceof DshAuthError
+          ? err
+          : new DshAuthError(
+              AUTH_ERROR_CODES.credentialsUnreadable,
+              // 包一层上下文：既保留原始错误串（含 ENOENT 等可诊断线索），
+              // 也保住 "credentials" 关键词（diagnose 据此归类 authFailed）
+              `Cannot read DSH credentials: ${err instanceof Error ? err.message : String(err)}`,
+              err
+            );
       throw this.lastError; // 归一为 DshAuthError 供上层 UI 提示「DSH 凭据不可读」
     }
   }

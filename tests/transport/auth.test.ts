@@ -142,7 +142,8 @@ describe("YAML 凭据解析", () => {
     const bad1 = ["records:", "  client-connection/browser-session:", "    kind: grant", "    payload:", "      version: 1", "      secret: a+b/c==", ""].join("\n");
     expect(() => extractSecretFromYaml(bad1)).toThrow(/base64url/);
     const short = encodeBase64Url(randomBytes(16));
-    expect(() => extractSecretFromYaml(credsYaml(short))).toThrow(/长度非法/);
+    // P1-3：兜底文案改英文（错误码 auth/secret-length-invalid 稳定不变）
+    expect(() => extractSecretFromYaml(credsYaml(short))).toThrow(/invalid length/);
   });
 });
 
@@ -330,7 +331,8 @@ describe("DshCookieAuth（真实文件路径：<homedir>/.dsh/.credentials.yaml�
 
   it("凭据文件缺失 → 抛含路径的明确错误；文件重建后自动恢复", async () => {
     const auth = new DshCookieAuth({ baseUrl: "http://127.0.0.1:3080", homedir: () => dir });
-    await expect(auth.cookieHeader()).rejects.toThrow(/无法读取 DSH 凭据文件/);
+    // P1-3：兜底文案改英文（错误码 auth/credentials-unreadable 稳定不变），路径仍必须带出
+    await expect(auth.cookieHeader()).rejects.toThrow(/Cannot read DSH credentials file/);
     writeFileSync(credsPath, credsYaml(encodeBase64Url(SECRET_A)));
     const header = await auth.cookieHeader();
     expectSignedWith(header, SECRET_A);
@@ -379,5 +381,78 @@ describe("DshCookieAuth（真实文件路径：<homedir>/.dsh/.credentials.yaml�
     const [h1, h2] = await Promise.all([auth.cookieHeader(), auth.cookieHeader()]);
     expect(reads).toBe(1);
     expect(h1).toBe(h2);
+  });
+});
+
+/**
+ * P1-3：底层错误国际化。auth 层的错误对象必须带**稳定错误码**（供 UI 映射 i18n key），
+ * `message` 是**英文兜底**（日志/未映射时也不会让英文用户看到中文）。
+ */
+describe("错误码 + 英文兜底（P1-3）", () => {
+  /** 汉字扫描：兜底 message 不得含中文。 */
+  const HAN = /[\u4e00-\u9fff]/u;
+
+  /** 断言是带期望 code 的 DshAuthError，且 message 非空、纯英文。 */
+  function expectCodedAuthError(fn: () => unknown, code: string): void {
+    try {
+      fn();
+    } catch (err) {
+      expect(err).toBeInstanceOf(DshAuthError);
+      const e = err as DshAuthError;
+      expect(e.code).toBe(code);
+      expect(typeof e.message).toBe("string");
+      expect(e.message.length).toBeGreaterThan(0);
+      expect(e.message).not.toMatch(HAN);
+      return;
+    }
+    throw new Error(`expected DshAuthError(${code}) to be thrown`);
+  }
+
+  it("secret 非法 base64url（两处抛点）→ code = auth/secret-invalid + 英文兜底", () => {
+    // 带 padding 的普通 base64（字典校验失败）与 % 4 === 1 的短串（长度校验失败）各命中一处抛点
+    expectCodedAuthError(() => decodeBase64Url(SECRET_A.toString("base64")), "auth/secret-invalid");
+    expectCodedAuthError(() => decodeBase64Url("a"), "auth/secret-invalid");
+  });
+
+  it("YAML 里的 secret 非法 → 同一 code 透传（两处抛点共用同一码）", () => {
+    const yaml = ["records:", "  client-connection/browser-session:", "    kind: grant", "    payload:", "      version: 1", "      secret: a+b/c==", ""].join("\n");
+    expectCodedAuthError(() => extractSecretFromYaml(yaml), "auth/secret-invalid");
+  });
+
+  it("凭据类兜底文案保留 credentials 关键词（diagnose 据此归类 authFailed）", async () => {
+    // src/core/diagnose.ts 用 /凭据|credentials/i 把凭据故障归到 authFailed；
+    // 文案改英文后必须保住这个线索，否则设置面板的诊断提示会退化成 unknown。
+    const cases: Array<() => Promise<unknown>> = [
+      async () => extractSecretFromYaml("records:\n  other/record:\n    payload:\n      secret: x\n"),
+      async () => extractSecretFromYaml(credsYaml(encodeBase64Url(randomBytes(16)))),
+      async () => {
+        const auth = new DshCookieAuth({
+          baseUrl: "http://127.0.0.1:3080",
+          readCredentialsFile: async () => {
+            throw new Error("ENOENT");
+          },
+        });
+        await auth.cookieHeader();
+      },
+    ];
+    for (const run of cases) {
+      let message = "";
+      try {
+        await run();
+      } catch (err) {
+        message = (err as Error).message;
+      }
+      expect(message).toMatch(/credentials/i);
+    }
+  });
+
+  it("无法获取用户主目录（返回空串 / homedir 抛异常）→ code = auth/home-unresolved + 英文兜底", () => {
+    expectCodedAuthError(() => defaultCredentialsPath(() => ""), "auth/home-unresolved");
+    expectCodedAuthError(
+      () => defaultCredentialsPath(() => {
+        throw new Error("homedir unavailable");
+      }),
+      "auth/home-unresolved"
+    );
   });
 });

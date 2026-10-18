@@ -222,6 +222,33 @@ describe("SessionStore 批4 follow/control 帧", () => {
     expect(store.ensureView("s2").queueItems).toHaveLength(0); // 队列不物化未打开会话
   });
 
+  /**
+   * 回归：DSH 从 0.1.7-rc.1 起，session/control 的 baseline 只剩 projections，
+   * 不再下发 queues/jobs。旧实现无条件 Object.entries(frame.value.queues)，
+   * 会抛 TypeError: Cannot convert undefined or null to object。
+   *
+   * 后果比"抛个错"严重：projections 已经在前面应用成功（数据进库），
+   * 但异常让本帧剩余逻辑与 notify() 全部跳过（UI 不重绘），
+   * 而异常又被 globalStreams 的空 catch 吞掉 → 控制流首帧即死且静默。
+   *
+   * 这里用真机抓到的原始帧形状（value 只有 projections）做契约测试。
+   */
+  it("applyControlFrame baseline 缺 queues/jobs 时不抛错，且投影与通知照常生效", () => {
+    const store = new SessionStore();
+    store.ensureView("s1");
+    const realBaseline = {
+      type: "baseline",
+      value: {
+        projections: {
+          s1: { asOfSeq: 12, values: { title: "真实帧标题" } },
+        },
+      },
+    } as unknown as SessionControlFrame; // 真机帧就没有 queues/jobs，故穿透类型断言
+
+    expect(() => store.applyControlFrame(realBaseline)).not.toThrow();
+    expect(store.getView("s1")?.title).toBe("真实帧标题");
+  });
+
   it("applyControlFrame 增量帧：queue 更新 / projection higher-seq-wins / jobs 忽略", () => {
     const store = new SessionStore();
     store.ensureView("s1");

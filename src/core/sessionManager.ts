@@ -24,6 +24,33 @@ import type {
   SessionSummary,
 } from "../transport/types";
 
+/**
+ * 会话层本地错误码（**稳定契约**：UI 按 code 映射 i18n 文案）。
+ *
+ * 与 `RpcError.code` 同构（`域/短横线短语`），但来源是本层自己判定的协议/参数问题，
+ * 不是服务端返回的码——两者语义不要混用（服务端码原样透传，不改写）。
+ */
+export const SESSION_ERROR_CODES = {
+  /** follow 流在首帧（snapshot）到达前就结束了：服务端违约或连接瞬断。 */
+  followEndedBeforeFirstFrame: "session/follow-ended-before-first-frame",
+  /** follow 首帧不是 snapshot：服务端协议违约，无法建立折叠基线。 */
+  followFirstFrameNotSnapshot: "session/follow-first-frame-not-snapshot",
+  /** 待发送内容为空（本地拒绝，避免 gateway/arguments-invalid 噪音）。 */
+  invalidContent: "invalid-content",
+} as const;
+
+export type SessionErrorCode = (typeof SESSION_ERROR_CODES)[keyof typeof SESSION_ERROR_CODES];
+
+/**
+ * 会话层本地错误：带稳定 `code` + **英文兜底** `message`（不 import i18n，见 auth.ts 同名说明）。
+ */
+export class SessionError extends Error {
+  constructor(readonly code: SessionErrorCode, message: string, readonly cause?: unknown) {
+    super(message);
+    this.name = "SessionError";
+  }
+}
+
 export interface SessionManagerDeps {
   client: DshClient;
   store: SessionStore;
@@ -229,12 +256,20 @@ export class SessionManager {
         void iterator.return?.().catch(() => undefined); // 丢弃路径收口：驱动 cancel，避免 inbox 残留至断线
         return;
       }
-      if (first.done) throw new Error("DSH follow 流在首帧前结束");
+      if (first.done) {
+        throw new SessionError(
+          SESSION_ERROR_CODES.followEndedBeforeFirstFrame,
+          "DSH follow stream ended before the first frame"
+        );
+      }
       const frame = first.value;
       if (frame.type !== "snapshot") {
         // 协议违约：首帧必须是 snapshot（服务端保证），否则后续折叠无基线
         controller.abort();
-        throw new Error("DSH follow 流首帧不是 snapshot");
+        throw new SessionError(
+          SESSION_ERROR_CODES.followFirstFrameNotSnapshot,
+          "DSH follow stream first frame is not a snapshot"
+        );
       }
       this.deps.store.applyFollowSnapshot(sessionId, frame);
       this.currentId = sessionId;
@@ -365,7 +400,10 @@ export class SessionManager {
     mode: "queue" | "steer" = "queue"
   ): Promise<RpcResult<PromptResult>> {
     if (content.length === 0) {
-      return { ok: false, error: { code: "invalid-content", message: "没有可发送的内容" } };
+      return {
+        ok: false,
+        error: { code: SESSION_ERROR_CODES.invalidContent, message: "Nothing to send" },
+      };
     }
     return this.client.prompt({ sessionId, mode, content: [...content] });
   }

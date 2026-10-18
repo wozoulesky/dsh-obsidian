@@ -7,7 +7,7 @@
  * - 待办清单：三态计数摘要（零计数段省略）+ 渲染签名（签名不变时 chatView 一帧 DOM 都不动）。
  */
 import { describe, expect, it } from "vitest";
-import { DEFAULT_STRINGS } from "../../src/i18n";
+import { DEFAULT_STRINGS, EN_STRINGS } from "../../src/i18n";
 import {
   TODO_GLYPH,
   contextUsageLine,
@@ -18,6 +18,7 @@ import {
   todoSummaryText,
   todosSignature,
   tokenUsageText,
+  turnNoticeText,
   writeMetrics,
   writeTodos,
   type PanelElement,
@@ -365,5 +366,50 @@ describe("writeTodos（待办面板 DOM）", () => {
     expect(writeTodos(el, null, t, sig)).toBe("");
     expect(el.has("dsh-hidden")).toBe(true);
     expect(el.children).toHaveLength(0);
+  });
+});
+
+/**
+ * 回合异常收尾提示（真机发现：给已归档会话发消息 → `turn/end {kind:"blocked"}`，
+ * 消息被丢弃但 `prompt` 返回 accepted，界面上消息凭空消失，用户无从判断）。
+ *
+ * DSH 的 reason 六种：completed | blocked | aborted | interrupted | error | max-tokens。
+ * 除 error（有服务端正文，走 ErrorNode）外都不带原因字段，只能按 kind 给固定措辞。
+ */
+describe("turnNoticeText：回合异常收尾提示", () => {
+  it("blocked 明确告知「没有被执行」并给出可操作建议", () => {
+    const text = turnNoticeText("blocked", t);
+    expect(text).toContain("没有被执行");
+    expect(text).toContain("新建会话"); // 必须给出下一步动作，否则用户只会困惑
+  });
+
+  it("aborted / interrupted / max-tokens 各有专门措辞，不复用 blocked 的文案", () => {
+    const blocked = turnNoticeText("blocked", t);
+    for (const kind of ["aborted", "interrupted", "max-tokens"]) {
+      const text = turnNoticeText(kind, t);
+      expect(text).not.toBe(blocked);
+      expect(text.length).toBeGreaterThan(0);
+      expect(text).not.toBe(kind); // 不能退化成裸 key 名
+    }
+  });
+
+  it("未知 kind 退化到带 {reason} 的兜底，绝不返回空串（DSH 新增收尾类型时不静默）", () => {
+    const text = turnNoticeText("forked", t);
+    expect(text).not.toBe("forked");
+    expect(text).toContain("forked"); // 把未知 kind 原样带给用户/回传排查
+    expect(text.trim().length).toBeGreaterThan(0);
+  });
+
+  it("英文环境下不残留中文，且两语言都非空", () => {
+    const en: Translate = (key, params) => {
+      let text = EN_STRINGS[key] ?? key;
+      if (params) text = text.replace(/\{(\w+)\}/g, (m, name: string) => (params[name] !== undefined ? String(params[name]) : m));
+      return text;
+    };
+    for (const kind of ["blocked", "aborted", "interrupted", "max-tokens", "forked"]) {
+      const text = turnNoticeText(kind, en);
+      expect(text.trim().length).toBeGreaterThan(0);
+      expect(/[\u4e00-\u9fff]/u.test(text), `英文文案残留中文: ${text}`).toBe(false);
+    }
   });
 });

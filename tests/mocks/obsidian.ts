@@ -15,6 +15,32 @@ export function resetMockSettingHandlers(): void {
   mockButtonOnClick.length = 0;
 }
 
+/**
+ * 语言与版本门槛（对应真实 API `getLanguage()` / `requireApiVersion()`）。
+ * 默认值让测试环境表现得像「中文宿主 + 足够新的版本」——与插件此前的默认行为一致。
+ * 需要验证回退路径的用例可临时改写 `mockObsidianLanguage.value` / `mockApiVersion.value`。
+ */
+export const mockObsidianLanguage = { value: "zh" };
+export const mockApiVersion = { value: "1.13.0" };
+
+export function getLanguage(): string {
+  return mockObsidianLanguage.value;
+}
+
+/** 语义同真实 API：当前版本 >= 期望版本才为 true（按数值段逐段比较）。 */
+export function requireApiVersion(version: string): boolean {
+  const parse = (v: string): number[] => v.split(".").map((p) => Number.parseInt(p, 10) || 0);
+  const want = parse(version);
+  const have = parse(mockApiVersion.value);
+  for (let i = 0; i < Math.max(want.length, have.length); i++) {
+    const w = want[i] ?? 0;
+    const h = have[i] ?? 0;
+    if (h > w) return true;
+    if (h < w) return false;
+  }
+  return true;
+}
+
 type TextStub = {
   setValue(value: string): TextStub;
   onChange(cb: (value: string) => unknown): TextStub;

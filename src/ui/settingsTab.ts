@@ -23,7 +23,7 @@ export class DshSettingTab extends PluginSettingTab {
     // 诊断失败先别急着下结论：更常见的是「地址填错了入口」——桌面 App 19387、`dsh web` 3080。
     // 探测命中就落盘并说明要重载才生效（正式客户端是用旧地址构造的，无法就地换）。
     // 覆盖 onload 探测的盲区：Obsidian 先启动、DSH 后启动时，onload 那一次什么也探不到。
-    const detected = await this.plugin.findWorkingDshUrl(this.plugin.settings.values.dshUrl);
+    const detected = await this.plugin.findWorkingDshUrl(this.plugin.settings.values.dshUrl, true);
     if (detected !== null) {
       this.plugin.settings.values.dshUrl = detected;
       await this.plugin.settings.save().catch(() => {

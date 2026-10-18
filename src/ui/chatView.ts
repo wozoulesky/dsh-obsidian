@@ -18,7 +18,7 @@ import {
 import { buildPromptContent, toCommandAttachments, type ReadyImage } from "./imageAttach";
 import { classifyCommandResult } from "../core/commands";
 import { goalPanelSignature, goalPanelState, goalRefOf, goalSummaryText } from "./goalPanel";
-import { contextUsageText, renderReasoning, tokenUsageText, writeMetrics, writeTodos, type Translate } from "./sessionStatus";
+import { contextUsageText, renderReasoning, tokenUsageText, turnNoticeText, writeMetrics, writeTodos, type Translate } from "./sessionStatus";
 import type { I18n } from "../i18n";
 import { clearTimer, setTimer } from "../utils/timers";
 import type { DshRuntime } from "../main";
@@ -782,6 +782,11 @@ export class DshChatView extends ItemView {
           ? this.runtime.i18n.t("chat.commandLineWithText", { status: statusText, name: node.name, text: node.text })
           : this.runtime.i18n.t("chat.commandLine", { status: statusText, name: node.name }),
       });
+    }
+    if (node.kind === "notice") {
+      // 回合异常收尾（blocked/aborted/interrupted/max-tokens/…）：纯文本提示，不带「错误」前缀，
+      // 因为这不是执行中出错，而是**根本没跑**或**提前停了**——两者对用户的含义不同。
+      return this.nodesEl.createDiv({ cls: "dsh-msg-context", text: turnNoticeText(node.reason, this.translate) });
     }
     const wrap = this.nodesEl.createDiv({ cls: "dsh-msg-assistant" });
     // 思考过程折叠块（正文上方）：仅当有推理内容时渲染。流式期间默认展开并跟随更新

@@ -402,14 +402,23 @@ export type SessionFollowFrame =
   | { type: "event"; event: SessionEvent }
   | { type: "assistant-stream"; frame: AssistantStreamFrame };
 
-/** session/control 流：每代一条 baseline（queues/jobs/projections 三个 Record）+ 增量 queue/jobs/projection 帧。 */
+/**
+ * session/control 流：每代一条 baseline + 增量 queue/jobs/projection 帧。
+ *
+ * **baseline 形状随 DSH 版本漂移过**：0.1.7-rc.1 起服务端不再下发 `queues`/`jobs`，
+ * 真机（0.2.1-rc.2）基线帧的 `value` 只有 `["projections"]`。
+ * 因此这三个字段都按**可选**声明——把已消失的字段标成必填会让编译器失去报警能力，
+ * 正是这一点让 `Object.entries(undefined)` 的 TypeError 潜伏了很久。
+ */
 export type SessionControlFrame =
   | {
       type: "baseline";
       value: {
-        queues: Record<string, QueuedInboxItem[]>;
-        jobs: Record<string, unknown[]>;
-        projections: Record<string, ProjectionsBlock>;
+        /** 旧版 DSH（<0.1.7-rc.1）才有；新版不下发。 */
+        queues?: Record<string, QueuedInboxItem[]>;
+        /** 旧版 DSH 才有；新版不下发。 */
+        jobs?: Record<string, unknown[]>;
+        projections?: Record<string, ProjectionsBlock>;
       };
     }
   | { type: "queue"; sessionId: string; items: QueuedInboxItem[] }

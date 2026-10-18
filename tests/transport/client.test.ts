@@ -14,7 +14,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createServer, type IncomingMessage, type Server } from "http";
 import { DshClient, postJson, TransportFailure } from "../../src/transport/client";
-import { DshAuthError, DshCookieAuth } from "../../src/transport/auth";
+import { AUTH_ERROR_CODES, DshAuthError, DshCookieAuth } from "../../src/transport/auth";
 import { RemoteMuxTransport } from "../../src/transport/muxStream";
 
 let server: Server;
@@ -495,7 +495,7 @@ describe("DshClient 新契约（端点斜杠 + args 包装 + Cookie）", () => {
     const client = new DshClient({
       baseUrl,
       cookieHeader: async () => {
-        throw new DshAuthError("DSH 凭据不可读");
+        throw new DshAuthError(AUTH_ERROR_CODES.credentialsUnreadable, "DSH credentials unreadable");
       },
     });
     await expect(client.list()).rejects.toBeInstanceOf(DshAuthError);
@@ -583,35 +583,36 @@ describe("DshClient 新契约（端点斜杠 + args 包装 + Cookie）", () => {
 });
 
 describe("DshClient 错误路径", () => {
-  it("响应 rpcId 不匹配时返回 internal 错误（信封回显校验）", async () => {
+  it("响应 rpcId 不匹配时返回 transport/rpc-id-mismatch（信封回显校验）", async () => {
     const client = makeClient();
     const res = await client.call("echo/mismatch", {});
     expect(res.ok).toBe(false);
     if (!res.ok) {
-      expect(res.error.code).toBe("internal");
+      // P1-3：本地错误码从笼统的 "internal" 细化为稳定子码（UI 可按码映射）
+      expect(res.error.code).toBe("transport/rpc-id-mismatch");
       expect(res.error.message).toContain("rpcId");
     }
   });
 
-  it("非 JSON 响应返回 internal 错误", async () => {
+  it("非 JSON 响应返回 transport/malformed-response", async () => {
     const client = makeClient();
     const res = await client.call("echo/malformed", {});
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.error.code).toBe("internal");
+    if (!res.ok) expect(res.error.code).toBe("transport/malformed-response");
   });
 
-  it("信封格式非法（非 server-response）返回 internal 错误", async () => {
+  it("信封格式非法（非 server-response）返回 transport/invalid-envelope", async () => {
     const client = makeClient();
     const res = await client.call("echo/invalid-envelope", {});
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.error.code).toBe("internal");
+    if (!res.ok) expect(res.error.code).toBe("transport/invalid-envelope");
   });
 
-  it("畸形错误结果归一化为 internal（code 非字符串）", async () => {
+  it("畸形错误结果归一化为 transport/invalid-error-shape（code 非字符串）", async () => {
     const client = makeClient();
     const res = await client.call("echo/bad-error-shape", {});
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.error.code).toBe("internal");
+    if (!res.ok) expect(res.error.code).toBe("transport/invalid-error-shape");
   });
 
   it("业务错误原样透传（session/not-found 新错误码 + details）", async () => {
@@ -654,3 +655,51 @@ interface PromptRequestOnWire {
   mode: string;
   content: unknown[];
 }
+
+/**
+ * P1-3：底层错误国际化。信封层的本地错误必须是「稳定错误码 + 英文兜底」，
+ * 供 UI 层按 code 映射 i18n 文案；未映射时英文用户也不会看到中文。
+ */
+describe("本地错误码 + 英文兜底（P1-3）", () => {
+  /** 汉字扫描：兜底 message 不得含中文。 */
+  const HAN = /[\u4e00-\u9fff]/u;
+
+  /** 断言 RpcResult 的失败分支带期望 code，message 非空且无中文。 */
+  function expectLocalError(res: { ok: boolean }, code: string): void {
+    expect(res.ok).toBe(false);
+    const error = (res as { ok: false; error: { code: string; message: string } }).error;
+    expect(error.code).toBe(code);
+    expect(typeof error.message).toBe("string");
+    expect(error.message.length).toBeGreaterThan(0);
+    expect(error.message).not.toMatch(HAN);
+  }
+
+  it("非 JSON 响应 → code = transport/malformed-response + 英文兜底", async () => {
+    expectLocalError(await makeClient().call("echo/malformed", {}), "transport/malformed-response");
+  });
+
+  it("信封格式非法 → code = transport/invalid-envelope + 英文兜底", async () => {
+    expectLocalError(await makeClient().call("echo/invalid-envelope", {}), "transport/invalid-envelope");
+  });
+
+  it("rpcId 回显不匹配 → code = transport/rpc-id-mismatch + 英文兜底", async () => {
+    expectLocalError(await makeClient().call("echo/mismatch", {}), "transport/rpc-id-mismatch");
+  });
+
+  it("畸形错误结果 → code = transport/invalid-error-shape + 英文兜底", async () => {
+    expectLocalError(await makeClient().call("echo/bad-error-shape", {}), "transport/invalid-error-shape");
+  });
+
+  it("TransportFailure 带稳定 code（timeout / http-status / aborted / socket）", async () => {
+    const timeout = makeClient({ timeoutMs: 300 });
+    try {
+      await timeout.call("echo/slow", {});
+      throw new Error("expected TransportFailure");
+    } catch (err) {
+      expect(err).toBeInstanceOf(TransportFailure);
+      const e = err as TransportFailure;
+      expect(e.code).toBe("transport/timeout");
+      expect(e.message).not.toMatch(HAN);
+    }
+  }, 5000);
+});
