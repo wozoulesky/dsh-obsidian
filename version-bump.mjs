@@ -17,6 +17,8 @@ try {
 } catch {
   versions = {};
 }
-versions[target] = "1.7.2";
+// 跟随 manifest 当前的 minAppVersion，而不是硬编码 1.7.2：
+// 硬编码会在「本次发版同时提高最低版本」时静默写错，导致市场按旧最低版本放行。
+versions[target] = manifest.minAppVersion;
 writeFileSync("versions.json", JSON.stringify(versions, null, 2) + "\n");
 console.log(`版本已更新为 ${target}`);
