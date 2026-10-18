@@ -209,9 +209,47 @@ P1-5 引入的自愈状态机里，`givenUp` 是**永久终态** ——
   `connected` + `session/list` ok（120 个会话）。
 - 真实 Obsidian UI：换端口后 4 秒自愈，状态栏恢复「DSH 已连接」。
 
+### P1-7 补测试：渲染分类与 URL 判定（此前零覆盖）
+
+补两块长期无自动化保护的逻辑——不是新功能，是把已有的隐性契约钉住。
+
+**1. `src/ui/nodeRender.ts`（新增）：把 `chatView.buildNodeEl` 的分类决策抽成纯函数**
+
+原问题：`buildNodeEl` 是 60+ 行分支瀑布（user/error/command/notice/assistant），
+依赖 `this.nodesEl` / `this.runtime`，在 node 测试环境下无法覆盖 →
+**渲染分类从未有过测试**。P1-4 加的 notice 分支正是加在其中的；
+若日后有人调整分支顺序，notice 会落进 assistant 兜底、渲染成空助手气泡，
+而只有真机才能发现。
+
+抽出 `describeNode(node, t): NodePresentation`（kind / cls / text / imageLabel），
+`chatView` 改为消费它，DOM 与 Markdown 等副作用仍留在原处。
+新增 13 条测试覆盖：五类节点的类名与文案、带图/无图、命令三态、
+**notice 不得落到 assistant 兜底**、四种 reason 文案互异、未知 reason 兜底、空助手占位。
+
+反向验证：删掉 notice 分支 → 4 条测试同时变红。
+
+**2. `sameUrl` / `isLoopbackUrl`：从 `main.ts` 移入 `diagnose.ts` 并导出**
+
+原问题：这两个判定写在 `main.ts` 里且未导出，零测试；而它们直接决定
+「发现到的地址是否就是当前连不上的地址」（决定自愈会不会空转）与
+「是否允许本机端口发现」（决定远端 DSH 会不会被本机端口顶掉）。
+同时 `candidateDshUrls` 里还有一份内联的 loopback 判定，属同一规则两处实现。
+
+移入 diagnose 后 `candidateDshUrls` 改用 `isLoopbackUrl`，消除重复。新增 11 条测试。
+
+反向验证时发现并修强了一处**测试自身缺陷**：原用例 `127.0.0.1.evil.com`
+并不能防住 `includes/startsWith` 这类退化实现（该串并不以 `127.0.0.1` 结尾）。
+补上 `127.0.0.1127.0.0.1` 与 `evil-localhost.com` 两条，现在用 `includes` 实现会立即变红。
+
+**真机确认**：新构建部署后重启 Obsidian，notice 提示、助手回复、思考过程折叠、
+工具卡、上下文用量全部渲染正常，状态栏「DSH 已连接」，无 `load-error.log` / `stream-error.log`。
+
+**测试数**：674 → 698（+24），41 个测试文件全通过。
+
 ## 五、遗留（未做，建议后续）
 - **CI 只有 Ubuntu runner**：P0-3 这类平台相关竞态不会在 CI 变红（本次靠本地 macOS 复现才发现）。建议加 macOS runner。
-- **`eventFold`/`chatView` 仍无直接测试**：`chatView.ts` 953 行零直接测试。
+- **`chatView.ts` 仍无直接测试**：渲染分类已抽出并由 `nodeRender` 覆盖（P1-7），但 `chatView` 本身的 DOM 组装、
+  流式/缓存复用、头部与状态区渲染仍需 jsdom 才能测（当前环境无 DOM 库，未引入新依赖）。
 - **冷启动换端口**（P1-5）与**DSH 后启动**（P1-6）均已修复并真机验证；后者由用户实测发现，是 P1-5 的回归缺陷。
 - **`globalStreams` 的 `isExpectedStreamEnd` 依赖 `err.name` 字符串**：与 `muxStream.ts` 的赋值是隐式契约，
   改类名时需同步（已被回归测试部分覆盖，但建议抽成共享常量）。

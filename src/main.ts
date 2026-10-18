@@ -13,33 +13,8 @@ import { DshChatView, VIEW_TYPE_DSH_CHAT } from "./ui/chatView";
 import { InlineEditModal } from "./ui/inlineEditModal";
 import { DshSettingTab } from "./ui/settingsTab";
 import { I18n, loadI18n, resolveObsidianLanguage } from "./i18n";
-import { candidateDshUrls, discoverDshUrls, firstReachableDshUrl } from "./core/diagnose";
+import { candidateDshUrls, discoverDshUrls, firstReachableDshUrl, isLoopbackUrl, sameUrl } from "./core/diagnose";
 import { createRefindState, onConnected, onDiscoveryResult, onReconnectFailure, shouldRefind } from "./core/refind";
-
-/** 两个 DSH 地址是否指向同一入口（按 URL.href 归一化，容忍结尾斜杠差异；非法地址退化为字符串比较）。 */
-function sameUrl(a: string, b: string): boolean {
-  const norm = (u: string): string => {
-    try {
-      return new URL(u).href;
-    } catch {
-      return u;
-    }
-  };
-  return norm(a) === norm(b);
-}
-
-/**
- * 地址是否指向本机。与 `candidateDshUrls` 的 loopback 判定保持一致：
- * `localhost` 也算（macOS 上可能先解析到 ::1，但插件探测的都是 127.0.0.1）。
- */
-function isLoopbackUrl(url: string): boolean {
-  try {
-    const hostname = new URL(url).hostname;
-    return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "[::1]";
-  } catch {
-    return false;
-  }
-}
 
 /**
  * 探测超时：回环上健康 DSH 的 `session/list` 是毫秒级，3s 只用兜住「端口被占用但不应答」的僵死情况。

@@ -18,7 +18,8 @@ import {
 import { buildPromptContent, toCommandAttachments, type ReadyImage } from "./imageAttach";
 import { classifyCommandResult } from "../core/commands";
 import { goalPanelSignature, goalPanelState, goalRefOf, goalSummaryText } from "./goalPanel";
-import { contextUsageText, renderReasoning, tokenUsageText, turnNoticeText, writeMetrics, writeTodos, type Translate } from "./sessionStatus";
+import { contextUsageText, renderReasoning, tokenUsageText, writeMetrics, writeTodos, type Translate } from "./sessionStatus";
+import { describeNode } from "./nodeRender";
 import type { I18n } from "../i18n";
 import { clearTimer, setTimer } from "../utils/timers";
 import type { DshRuntime } from "../main";
@@ -762,33 +763,20 @@ export class DshChatView extends ItemView {
   private buildNodeEl(node: ViewNode): HTMLElement {
     // 统一用 this.nodesEl.createDiv（Obsidian helper 与社区审核规则 obsidianmd/prefer-create-el）；
     // 创建即挂载到 nodesEl 末尾，renderNow 随后按遍历顺序 appendChild 调整，最终顺序正确，与缓存复用兼容。
+    // 分类决策抽在 nodeRender.describeNode（纯函数、有单测）：分支顺序与 className
+    // 是渲染层的易错点，且 chatView 自身依赖 DOM 无法直接单测。
+    const p = describeNode(node, this.translate);
     if (node.kind === "user") {
-      const el = this.nodesEl.createDiv({ cls: node.sourceKind === "user" ? "dsh-msg-user" : "dsh-msg-context" });
+      const el = this.nodesEl.createDiv({ cls: p.cls });
       // 图片消息：正文里没有图片本体（事件只带 durable 引用），用计数标记提示"这条带图"
-      if (node.imageCount > 0) {
-        el.createDiv({ cls: "dsh-msg-images", text: this.runtime.i18n.t("chat.imageCount", { count: node.imageCount }) });
-      }
+      if (p.imageLabel) el.createDiv({ cls: "dsh-msg-images", text: p.imageLabel });
       if (node.text.length > 0) el.createDiv({ text: node.text });
       return el;
     }
-    if (node.kind === "error") {
-      return this.nodesEl.createDiv({ cls: "dsh-msg-context", text: this.runtime.i18n.t("chat.turnError", { message: node.text }) });
+    if (node.kind === "error" || node.kind === "command" || node.kind === "notice") {
+      return this.nodesEl.createDiv({ cls: p.cls, text: p.text });
     }
-    if (node.kind === "command") {
-      const statusText = node.status === "running" ? "⏳" : node.status === "success" ? "✓" : "✗";
-      return this.nodesEl.createDiv({
-        cls: "dsh-msg-command",
-        text: node.text
-          ? this.runtime.i18n.t("chat.commandLineWithText", { status: statusText, name: node.name, text: node.text })
-          : this.runtime.i18n.t("chat.commandLine", { status: statusText, name: node.name }),
-      });
-    }
-    if (node.kind === "notice") {
-      // 回合异常收尾（blocked/aborted/interrupted/max-tokens/…）：纯文本提示，不带「错误」前缀，
-      // 因为这不是执行中出错，而是**根本没跑**或**提前停了**——两者对用户的含义不同。
-      return this.nodesEl.createDiv({ cls: "dsh-msg-context", text: turnNoticeText(node.reason, this.translate) });
-    }
-    const wrap = this.nodesEl.createDiv({ cls: "dsh-msg-assistant" });
+    const wrap = this.nodesEl.createDiv({ cls: p.cls });
     // 思考过程折叠块（正文上方）：仅当有推理内容时渲染。流式期间默认展开并跟随更新
     // （与官方 DSH 语义一致：回合进行中 reasoning 保持展开，收尾后折叠）；流式取尾部
     // （用户在看"现在想到哪"），定格取头部（从头读）。推理可能极长，必须截断。
@@ -801,7 +789,7 @@ export class DshChatView extends ItemView {
       body.addClass("dsh-streaming-text");
       body.setText(node.text.length > 0 ? node.text : "…");
     } else {
-      const text = node.text.length > 0 ? node.text : this.runtime.i18n.t("chat.noText");
+      const text = p.text;
       void MarkdownRenderer.render(this.app, text, body, "", this);
     }
     for (const card of node.toolCards) {

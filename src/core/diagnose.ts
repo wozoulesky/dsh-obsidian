@@ -422,14 +422,42 @@ function hrefOf(url: string): string | null {
  * `localhost` 也算 loopback：DSH 只绑 127.0.0.1，而 macOS 上 `localhost` 可能先解析到 ::1，
  * 此时探测 `127.0.0.1:3080` 正好把这种「地址写法导致的连不上」一起修掉。
  */
-export function candidateDshUrls(configuredUrl: string): string[] {
+/**
+ * 两个 DSH 地址是否指向同一入口（按 `URL.href` 归一化，容忍结尾斜杠差异）。
+ *
+ * 换端口自愈里用它跳过「就是当前这个连不上的地址」——否则发现结果会把当前地址
+ * 又选一遍，自愈空转。非法地址退化为字符串比较（不抛错：地址来自用户设置/落盘文件）。
+ */
+export function sameUrl(a: string, b: string): boolean {
+  const norm = (u: string): string => {
+    try {
+      return new URL(u).href;
+    } catch {
+      return u;
+    }
+  };
+  return norm(a) === norm(b);
+}
+
+/**
+ * 地址是否指向本机。`localhost` 也算（macOS 上可能先解析到 ::1，但插件探测的是 127.0.0.1）。
+ *
+ * 用途：**本机端口发现只对 loopback 成立**。用户若刻意配了远端 DSH，
+ * 绝不能用本机随机端口把它顶掉。
+ */
+export function isLoopbackUrl(url: string): boolean {
   let hostname: string;
   try {
-    hostname = new URL(configuredUrl).hostname;
+    hostname = new URL(url).hostname;
   } catch {
-    return [];
+    return false;
   }
-  if (hostname !== "127.0.0.1" && hostname !== "localhost" && hostname !== "[::1]") return [];
+  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "[::1]";
+}
+
+export function candidateDshUrls(configuredUrl: string): string[] {
+  // 复用 isLoopbackUrl：同一规则只留一处实现，避免改一边漏一边
+  if (!isLoopbackUrl(configuredUrl)) return [];
   const configured = hrefOf(configuredUrl);
   return [DSH_DESKTOP_URL, DSH_CLI_URL].filter((url) => hrefOf(url) !== configured);
 }
