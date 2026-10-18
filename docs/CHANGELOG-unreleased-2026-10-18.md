@@ -136,9 +136,48 @@ README 中英文已同步，删掉「桌面 App 固定 19387」的过时引导�
 | 产物内容 | 含 `1.8.7` 守卫、`dsh-auth-` 反解、英文串；**无 `constructor.name` 残留** |
 | 真机端到端 | 端口发现 237ms → 命中 56516 → mux connected → 3 帧 control 入库未抛错 → 中英 UI 正确 |
 
+### P1-5 DSH 重启换端口后插件永久失联（须重载 Obsidian）— 真机发现并修复
+
+**现象**：Obsidian 一直开着，用户重启 DSH（桌面端每次启动拿新的随机端口），
+插件状态栏从此停在「DSH 未运行（连接被拒绝）·重连中…」，即使 DSH 明明已在新端口跑起来。
+唯一出路是手动重载 Obsidian —— 这直接削弱了「一键安装、装完就用」的承诺。
+
+**根因**（三层，逐层挖出来的）：
+1. `baseUrl` 在 `onload` 里用 `const` 算一次就作为构造参数传给 `DshClient`，
+   `RemoteMuxTransport.baseUrl` 没有 setter；而 `scheduleReconnect()` 只调 `connect()`，
+   于是无限退避重试**同一个已失效的地址**。没有任何代码路径会重新发现新端口。
+2. `main.ts` 的 `onState` 只做重连，不做重新发现。
+3. **最隐蔽的一层**：即使加了「连续失败 N 次就重新发现」，也永远不会触发 ——
+   `emitState` 对同值去重，`"reconnecting"` 只在状态**翻转**时通知一次。
+   真机实测：杀掉旧端口后状态栏正确显示「未运行」，但自愈逻辑只收到 1 次通知，
+   阈值 3 永远达不到。这条是**真机验证才暴露**的，单元测试和代码阅读都看不出来。
+
+**修复**：
+- `RemoteMuxTransport.rebindBaseUrl(url, cookieHeader?)`：原地换入口。
+  保持实例身份不变（`manager`/`approvals`/`globalStreams` 都持有它）；
+  `generation++` + 关旧 socket（否则旧地址在途帧会串进新连接）；
+  复位 `attempt`/`lastRefused`/`refusedSinceOpen`；活动状态下自动续连。
+- **必须同时换凭据来源**：cookie 名 = `dsh-auth-<sha256(authority)>`，authority 含端口。
+  构造期 `() => auth.cookieHeader()` 闭包捕获的是旧 auth 对象，只换地址会继续用旧 authority
+  签的 cookie → 新地址一律 401。现场症状是「端口明明换对了还是连不上」，极易误判成服务端问题。
+- `DshClient.rebindBaseUrl(url, auth)`：换 `opts.baseUrl` + 换 auth + 让 mux 用动态闭包解析凭据。
+- 新增 `onRefused` 回调：**不去重**，每次被拒都回调（`onState` 保留给状态栏）。
+- `src/core/refind.ts`：自愈状态机抽成纯函数（`shouldRefind`/`onDiscoveryResult`/`onConnected`），
+  7 条单测钉住每条规则，其中「发现成功**不得**置 givenUp」是最容易写错的一条
+  （写错会导致用户第二次重启 DSH 就再也不会自愈）。
+- `main.ts.tryRefindDshUrl`：连续失败 3 次（`ECONNREFUSED` 时 2s 轮询 ≈6s）→ 重新发现并热切换 →
+  落盘 + `Notice` 告知 + 刷新会话列表。连续 5 轮找不到才放弃，连上即全部清零。
+  只对 loopback 生效：用户刻意配的远端 DSH 不能被本机端口顶掉。
+
+**真机验证**（用端口代理制造「真换端口」场景，比改配置更接近真实）：
+插件经代理 `27123 → 56516` 连上并显示「DSH 已连接」→ `kill -9` 代理模拟旧端口消失 →
+**4 秒后**配置自动切到 `56516`，状态栏恢复「DSH 已连接」，随后发送真实消息
+`SELFHEAL-OK` 并收到 DSH 回复 —— 整条 RPC + 事件流链路真的通了，全程用户无操作。
+
 ## 五、遗留（未做，建议后续）
 - **CI 只有 Ubuntu runner**：P0-3 这类平台相关竞态不会在 CI 变红（本次靠本地 macOS 复现才发现）。建议加 macOS runner。
 - **`eventFold`/`chatView` 仍无直接测试**：`chatView.ts` 953 行零直接测试。
+- **冷启动换端口已修复并真机验证**（P1-5），但「Obsidian 启动时 DSH 还没起来、随后才启动」的时序未单独验证。
 - **`globalStreams` 的 `isExpectedStreamEnd` 依赖 `err.name` 字符串**：与 `muxStream.ts` 的赋值是隐式契约，
   改类名时需同步（已被回归测试部分覆盖，但建议抽成共享常量）。
 - **issues #1/#2/#3 尚未回复/关闭**：草稿见 `docs/issue-triage-2026-10-17.md`；本轮未执行任何 `gh` 写操作。

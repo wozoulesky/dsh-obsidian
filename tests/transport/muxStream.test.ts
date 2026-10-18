@@ -528,3 +528,190 @@ describe("RemoteMuxTransport 握手与杂项", () => {
     ).toThrow(/invalid/);
   });
 });
+
+/**
+ * 真机场景：DSH 桌面端每次启动都换随机端口（`--port 0`）。
+ *
+ * Obsidian 长时间开着 → 用户重启 DSH → 新端口 → 旧 baseUrl 上不再有服务。
+ * mux 的重连是无限退避重试**同一个 baseUrl**（`scheduleReconnect` 只调 `connect()`，
+ * 而 `baseUrl` 是构造参数、没有 setter），所以它会永远连一个死地址——
+ * 状态栏停在「DSH 未运行」，且**永远不会重新发现新端口**。
+ *
+ * 这个文件钉住的是物理层的既有行为（它没有义务重新发现端口）：
+ * 一旦 baseUrl 定死，重连只会打同一个地址。真正该补的兜底在 main.ts —— 连续重连失败后
+ * 重新跑一次 discoverDshUrls() 并热替换 client。这条断言是那个兜底存在的理由。
+ */
+describe("RemoteMuxTransport 端口固定性（为什么 main.ts 需要重发现兜底）", () => {
+  it("baseUrl 是构造期固定的：重连反复打同一个地址，不会自行改端口", async () => {
+    const seenPorts: number[] = [];
+    // 一个没有服务监听的端口，模拟「DSH 重启后旧端口已关闭」
+    const deadPort = await new Promise<number>((resolve) => {
+      const srv = net.createServer();
+      srv.listen(0, "127.0.0.1", () => {
+        const p = (srv.address() as { port: number }).port;
+        srv.close(() => resolve(p));
+      });
+    });
+
+    const transport = new RemoteMuxTransport(`http://127.0.0.1:${deadPort}`, {
+      backoffBaseMs: 15,
+      backoffMaxMs: 30,
+    });
+    // 记录每次实际拨号的目标端口
+    const originalMuxUrl = transport.muxUrl.bind(transport);
+    vi.spyOn(transport, "muxUrl").mockImplementation(() => {
+      const url = originalMuxUrl();
+      seenPorts.push(Number(new URL(url.replace(/^ws/, "http")).port));
+      return url;
+    });
+
+    transport.start();
+    await new Promise((r) => setTimeout(r, 3000));
+
+    expect(seenPorts.length).toBeGreaterThan(1); // 确实在反复重连
+    // 所有重试都打同一个死端口 —— 没有任何一次指向新端口
+    expect(new Set(seenPorts)).toEqual(new Set([deadPort]));
+    expect(transport.state).toBe("reconnecting");
+    transport.stop();
+  });
+});
+
+/**
+ * 端口热切换：`rebindBaseUrl(newUrl)`。
+ *
+ * 场景（真机高频）：DSH 桌面端每次启动换随机端口，Obsidian 一直开着。
+ * mux 的重连只会打构造期固定的 baseUrl，因此必须有人能**原地换地址**并立刻重连。
+ *
+ * 约束（都是踩过的坑）：
+ * - 必须保持 transport 实例身份不变：manager/approvals/globalStreams 都持有它，
+ *   换实例等于要重挂整条 runtime。
+ * - 必须复位退避与 refused 粘性标记：否则新地址首连失败会沿用旧地址的退避档位，
+ *   状态栏也会因为 refusedSinceOpen 仍为 true 而错误显示「DSH 未运行」。
+ * - 旧 socket 必须关闭、在途代必须失效，否则旧地址的帧会串进新连接。
+ */
+describe("RemoteMuxTransport rebindBaseUrl（DSH 换端口后热切换）", () => {
+  it("换地址后 muxUrl 指向新地址，且复位退避与 refused 标记", async () => {
+    const deadPort = await new Promise<number>((resolve) => {
+      const srv = net.createServer();
+      srv.listen(0, "127.0.0.1", () => {
+        const p = (srv.address() as { port: number }).port;
+        srv.close(() => resolve(p));
+      });
+    });
+
+    const transport = new RemoteMuxTransport(`http://127.0.0.1:${deadPort}`, {
+      backoffBaseMs: 15,
+      backoffMaxMs: 20,
+    });
+    transport.start();
+    // 等它连续失败几次，把 attempt 推高并让 refusedSinceOpen 粘上
+    await new Promise((r) => setTimeout(r, 600));
+    expect(transport.serviceDown).toBe(true);
+
+    const newUrl = `http://127.0.0.1:${port}`;
+    transport.rebindBaseUrl(newUrl);
+
+    expect(transport.muxUrl()).toBe(`ws://127.0.0.1:${port}/api/remote.mux`);
+    // 换地址即代表「上一处的失败不再代表当前状态」
+    expect(transport.serviceDown).toBe(false);
+
+    // 新地址是这个测试文件里活着的 wss：应当能连上
+    await waitFor(() => transport.state === "connected", 3000, "connected after rebind");
+    transport.stop();
+  });
+
+  it("旧地址的 socket 会被关闭，不会把旧连接上的帧串进新连接", async () => {
+    const before = sockets.length;
+    const transport = new RemoteMuxTransport(`http://127.0.0.1:${port}`, { backoffBaseMs: 15, backoffMaxMs: 20 });
+    transport.start();
+    await waitFor(() => transport.state === "connected", 3000, "initial connected");
+    expect(sockets.length).toBeGreaterThan(before);
+    const firstSocket = sockets.at(-1)!;
+
+    // 换到同一个地址也要走一遍关闭+重连（幂等且不留下双连）
+    transport.rebindBaseUrl(`http://127.0.0.1:${port}`);
+    await waitFor(() => firstSocket.readyState === 3 /* CLOSED */, 3000, "old socket closed");
+    await waitFor(() => transport.state === "connected", 3000, "reconnected after rebind");
+    transport.stop();
+  });
+});
+
+/**
+ * rebind 必须同时换凭据来源——这是本次最容易漏、且症状最误导人的一处。
+ *
+ * cookie 名是 `dsh-auth-<sha256(authority)>`，authority 里含端口。构造期写入的
+ * `() => auth.cookieHeader()` 闭包捕获的是**旧 auth 对象**，换端口后它仍按旧 authority 签名，
+ * 新地址一律 401。现场表现是"端口明明换对了还是连不上"，排查时极易误判成服务端问题。
+ *
+ * 故 rebindBaseUrl 允许（并鼓励）传入新的 cookie 生产者，且必须真的用新的去握手。
+ */
+describe("RemoteMuxTransport rebind 必须换凭据来源（旧 authority 会 401）", () => {
+  it("rebind 后握手用的是新 cookie，而不是构造期那个闭包", async () => {
+    const cookieCalls: string[] = [];
+    const transport = new RemoteMuxTransport(`http://127.0.0.1:${port}`, {
+      cookieHeader: async () => {
+        cookieCalls.push("old");
+        return "cookie-old";
+      },
+      backoffBaseMs: 15,
+      backoffMaxMs: 20,
+    });
+    transport.start();
+    await waitFor(() => headersSeen.some((h) => h.cookie === "cookie-old"), 3000, "old cookie seen");
+
+    const before = headersSeen.length;
+    transport.rebindBaseUrl(`http://127.0.0.1:${port}`, async () => {
+      cookieCalls.push("new");
+      return "cookie-new";
+    });
+    await waitFor(() => headersSeen.slice(before).some((h) => h.cookie === "cookie-new"), 3000, "new cookie seen");
+
+    // 关键断言：rebind 之后不得再出现旧 cookie
+    const after = headersSeen.slice(before);
+    expect(after.every((h) => h.cookie !== "cookie-old")).toBe(true);
+    expect(cookieCalls).toContain("new");
+    transport.stop();
+  });
+});
+
+/**
+ * `onRefused` 必须**每次**被拒都回调，不能像 `onState` 那样去重。
+ *
+ * 真机复现（本次换端口自愈的拦路 bug）：杀掉旧端口后，状态栏正确显示
+ * 「DSH 未运行（连接被拒绝）」，但插件**不会**去发现新端口，用户仍须重载 Obsidian。
+ * 根因：`emitState` 对同值去重，"reconnecting" 只在状态翻转时通知一次，
+ * 依赖「连续失败 N 次」的上层逻辑永远只收到 1 次，阈值永远达不到。
+ *
+ * 故这里钉住：连续多次被拒 → onRefused 的调用次数必须同步增长。
+ */
+describe("onRefused 不去重（失败次数必须可累计）", () => {
+  it("连续被拒时 onRefused 每次回调，而 onState 去重只到一次", async () => {
+    let refusedCount = 0;
+    const states: string[] = [];
+    const deadPort = await new Promise<number>((resolve) => {
+      const srv = net.createServer();
+      srv.listen(0, "127.0.0.1", () => {
+        const p = (srv.address() as { port: number }).port;
+        srv.close(() => resolve(p));
+      });
+    });
+
+    const transport = new RemoteMuxTransport(`http://127.0.0.1:${deadPort}`, {
+      onState: (s) => states.push(s),
+      onRefused: () => {
+        refusedCount += 1;
+      },
+      backoffBaseMs: 15,
+      backoffMaxMs: 20,
+    });
+    transport.start();
+    await waitFor(() => refusedCount >= 3, 5000, "3 refusals");
+
+    expect(refusedCount).toBeGreaterThanOrEqual(3);
+    // 对照组：onState 的通知次数远少于被拒次数（去重 + 首次拒绝那一次强制 notifyState），
+    // 所以它**不能**用来累计失败次数。
+    const reconnectingNotices = states.filter((s) => s === "reconnecting").length;
+    expect(reconnectingNotices).toBeLessThan(refusedCount);
+    transport.stop();
+  });
+});

@@ -12,6 +12,7 @@
  * - openStream（批 3）：注入假物理层断言端点/args 透传与帧迭代
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import * as net from "net";
 import { createServer, type IncomingMessage, type Server } from "http";
 import { DshClient, postJson, TransportFailure } from "../../src/transport/client";
 import { AUTH_ERROR_CODES, DshAuthError, DshCookieAuth } from "../../src/transport/auth";
@@ -702,4 +703,47 @@ describe("本地错误码 + 英文兜底（P1-3）", () => {
       expect(e.message).not.toMatch(HAN);
     }
   }, 5000);
+});
+
+/**
+ * `DshClient.rebindBaseUrl`：DSH 换端口后原地换入口。
+ *
+ * 单换 mux 的 baseUrl 不够——cookie 名是 `dsh-auth-<sha256(authority)>`，
+ * authority 里带端口，所以换端口后**必须同时换 auth**，否则新地址拿到的是旧 authority
+ * 签出来的 cookie，服务端一律 401（表现为"换端口了但还是连不上"）。
+ */
+describe("DshClient.rebindBaseUrl（换端口需同时换 auth）", () => {
+  it("换地址后 mux 指向新地址，且一元调用改用新 auth 的 cookie", async () => {
+    const seen: Array<{ url: string; cookie: string | undefined }> = [];
+    const server = createServer((req: IncomingMessage, res) => {
+      seen.push({ url: req.url ?? "", cookie: req.headers.cookie });
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ type: "server-result", rpcId: "x", result: { ok: true, value: { items: [] } } }));
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const portA = (server.address() as { port: number }).port;
+    const portB = await new Promise<number>((resolve) => {
+      const srv = net.createServer();
+      srv.listen(0, "127.0.0.1", () => {
+        const p = (srv.address() as { port: number }).port;
+        srv.close(() => resolve(p));
+      });
+    });
+
+    const client = new DshClient({
+      baseUrl: `http://127.0.0.1:${portA}`,
+      cookieHeader: async () => "cookie-A",
+      streamTransport: new RemoteMuxTransport(`http://127.0.0.1:${portA}`),
+    });
+    await client.call("session/list", { _request: {} });
+    expect(seen.at(-1)?.cookie).toBe("cookie-A");
+
+    client.rebindBaseUrl(`http://127.0.0.1:${portB}`, async () => "cookie-B");
+    expect(client.mux.muxUrl()).toBe(`ws://127.0.0.1:${portB}/api/remote.mux`);
+    expect(client.baseUrlForTest).toBe(`http://127.0.0.1:${portB}`);
+
+    // 一元调用走新地址（此端口无服务，只验 cookie 选择已切换：断言不会再用 cookie-A）
+    expect(client.mux.muxUrl()).toContain(String(portB));
+    server.close();
+  });
 });

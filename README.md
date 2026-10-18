@@ -18,7 +18,7 @@ The plugin is a client, not a runtime: it needs a local DSH to talk to (see Prer
 
 ## Prerequisites
 
-- A running DSH instance on your machine. **Don't worry about the port**: since DSH 0.2.1 the desktop app is assigned a **random port on each launch** (it used to pin `19387`), and the `dsh web` command defaults to `3080`. The plugin **auto-discovers** the real port on startup — it tries the static candidates first, then reverse-resolves the Cookie store that the DSH desktop app writes, to locate the random port — and saves it back to settings — **you normally don't need to type an address**
+- A running DSH instance on your machine. **Don't worry about the port**: since DSH 0.2.1 the desktop app is assigned a **random port on each launch** (it used to pin `19387`), and the `dsh web` command defaults to `3080`. The plugin **auto-discovers** the real port on startup — it tries the static candidates first, then reverse-resolves the Cookie store that the DSH desktop app writes, to locate the random port — and saves it back to settings — **you normally don't need to type an address**. It also **re-discovers while running**: restart DSH without touching Obsidian and the plugin notices the connection repeatedly failing, finds the new port, and switches over on its own (typically ~4s) — **no reload needed**
 - Your vault must be inside DSH's accessible directory scope (decided by DSH's sandbox / workspace config)
 - Obsidian ≥ 1.7.2, desktop only
 
@@ -67,7 +67,7 @@ Long sessions stay bounded: when DSH compacts history, replaced messages collaps
 ## Installation (Community Plugins)
 
 1. Settings → Third-party plugins → Browse → search **DSH Bridge** → Install → Enable (desktop only)
-2. Just make sure DSH is running — **no address to fill in**: the plugin auto-discovers the real port and saves it back to settings. If it reports it can't connect, click **Diagnose** in the plugin settings to probe again (useful when DSH starts after Obsidian)
+2. Just make sure DSH is running — **no address to fill in**: the plugin auto-discovers the real port and saves it back to settings. If DSH starts later — or restarts on a new port — the plugin re-discovers and reconnects by itself; click **Diagnose** in the plugin settings only if it still can't connect
 
 The UI language **follows your Obsidian language setting automatically** (Chinese in Chinese locales, English elsewhere) — no manual switching.
 

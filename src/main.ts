@@ -14,6 +14,7 @@ import { InlineEditModal } from "./ui/inlineEditModal";
 import { DshSettingTab } from "./ui/settingsTab";
 import { I18n, loadI18n, resolveObsidianLanguage } from "./i18n";
 import { candidateDshUrls, discoverDshUrls, firstReachableDshUrl } from "./core/diagnose";
+import { createRefindState, onConnected, onDiscoveryResult, onReconnectFailure, shouldRefind } from "./core/refind";
 
 /** 两个 DSH 地址是否指向同一入口（按 URL.href 归一化，容忍结尾斜杠差异；非法地址退化为字符串比较）。 */
 function sameUrl(a: string, b: string): boolean {
@@ -46,6 +47,7 @@ function isLoopbackUrl(url: string): boolean {
  */
 const PROBE_TIMEOUT_MS = 3000;
 
+
 export interface DshRuntime {
   plugin: DshPlugin;
   settings: DshSettings;
@@ -66,6 +68,9 @@ export default class DshPlugin extends Plugin {
   statusBarEl!: HTMLElement;
   /** 两条全局长流的生命周期（onload 创建，onunload stop）。 */
   private globalStreams: GlobalStreams | null = null;
+
+  /** 换端口自愈的状态机（见 core/refind.ts 与 tryRefindDshUrl）。 */
+  private refindState = createRefindState();
 
   async onload(): Promise<void> {
     try {
@@ -106,6 +111,12 @@ export default class DshPlugin extends Plugin {
         baseUrl,
         auth: new DshCookieAuth(this.authOptions(baseUrl)),
         transportOptions: {
+          // 每次连接被拒都计数（onState 对同值去重，只会在状态翻转时到一次，
+          // 拿它数失败次数永远到不了阈值——真机上表现就是「状态栏说未运行，但插件不去找新端口」）。
+          onRefused: () => {
+            onReconnectFailure(this.refindState);
+            if (shouldRefind(this.refindState)) void this.tryRefindDshUrl(i18n);
+          },
           onState: (state) => {
             runtime.muxState = state;
             // 断线原因要能落到状态栏：ECONNREFUSED = DSH 没在跑（最高频的「为什么连不上」），
@@ -118,6 +129,8 @@ export default class DshPlugin extends Plugin {
                   : i18n.t("main.statusReconnecting")
             );
             if (state === "connected") {
+              // 连上了：清零换端口自愈的全部状态（下次断线要能重新自愈）
+              onConnected(this.refindState);
               // 物理连接就绪：重开两条全局流（首次连接与每次重连统一走这里；
               // $events 重开会拿新 clientId，approvals 由 ready 帧重新绑定）
               this.globalStreams?.startAll();
@@ -299,6 +312,55 @@ export default class DshPlugin extends Plugin {
 
   vaultPath(): string {
     return (this.app.vault.adapter as unknown as { getBasePath(): string }).getBasePath();
+  }
+
+  /**
+   * 连接持续失败时重新发现 DSH 入口并**热切换**（不重载插件）。
+   *
+   * 为什么必须有：DSH 0.2.1 桌面端每次启动都用 `--port 0` 拿新的随机端口，
+   * 而 mux 的重连是无限退避重试**构造期固定**的 baseUrl（`scheduleReconnect` 只调
+   * `connect()`，`baseUrl` 没有变化途径）。结果：用户重启 DSH 后插件永远连旧端口，
+   * 状态栏停在「DSH 未运行」，除非手动重载 Obsidian —— "装完就用"的承诺只在首次启动成立。
+   *
+   * 触发时机与并发保护都收敛在 `core/refind.ts` 的状态机里（有单测钉住每条规则）：
+   * 连续失败 `REFIND_FAILURES` 次才发现（避开 DSH 正常重启的抖动），
+   * `refinding` 互斥，连续 `REFIND_MAX_MISSES` 轮找不到才放弃；连上即全部清零。
+   */
+  private async tryRefindDshUrl(i18n: I18n): Promise<void> {
+    const state = this.refindState;
+    if (state.refinding || state.givenUp) return;
+    const runtime = this.runtime;
+    if (!runtime) return;
+    state.refinding = true;
+    try {
+      const currentUrl = runtime.client.baseUrlForTest;
+      // 只对 loopback 做本机端口发现：用户刻意配的远端 DSH 不能被本机端口顶掉。
+      if (!isLoopbackUrl(currentUrl)) {
+        state.givenUp = true; // 远端地址不适用本机端口发现，本轮不再尝试
+        return;
+      }
+      const discovered = await discoverDshUrls({ scan: false }).catch(() => [] as string[]);
+      // 逐个探测，跳过「就是当前这个连不上的地址」
+      const candidates = discovered.filter((url) => !sameUrl(url, currentUrl));
+      const reachable = await firstReachableDshUrl(candidates, (url) => this.probeDshUrl(url));
+      // 没找到（DSH 可能还在启动）→ 下轮重连再试；连续失败到上限才放弃。
+      // 规则细节见 core/refind.ts（那里有单测钉住「成功不得置 givenUp」）。
+      if (!onDiscoveryResult(state, reachable !== null) || reachable === null) return;
+      const previous = currentUrl;
+      runtime.client.rebindBaseUrl(reachable, new DshCookieAuth(this.authOptions(reachable)));
+      this.settings.values.dshUrl = reachable;
+      await this.settings.save().catch(() => {
+        // 落盘失败不影响本次会话：内存与已切换的连接都已是新地址
+      });
+      new Notice(i18n.t("settings.dshUrlAutoSwitched", { url: reachable, previous }));
+      // 换地址后重开会话列表（旧 socket 已在 rebind 里关掉，两条全局流由
+      // onState("connected") 统一重开；这里补一次列表刷新，避免 UI 停在旧快照）
+      runtime.manager.refresh().catch((err) => console.error("[dsh-bridge] 换端口后刷新会话列表失败:", err));
+    } catch (err) {
+      console.error("[dsh-bridge] 重新发现 DSH 入口失败:", err);
+    } finally {
+      state.refinding = false;
+    }
   }
 
   async activateView(): Promise<void> {

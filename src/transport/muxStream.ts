@@ -49,6 +49,13 @@ export interface RemoteMuxTransportOptions {
   cookieHeader?: () => Promise<string>;
   /** 状态变化（去重后的转换）：main.ts 接状态栏。 */
   onState?: (state: MuxState) => void;
+  /**
+   * 每次「连接被拒绝」都会回调一次（**不去重**）。
+   *
+   * `onState` 对同值去重，只适合驱动状态栏；任何需要「失败次数」的逻辑必须用这个回调，
+   * 否则只会收到首次通知。典型用途：main.ts 的换端口自愈（连续失败 N 次后重新发现入口）。
+   */
+  onRefused?: () => void;
 }
 
 /** 指数退避延迟（纯函数）：attempt 从 1 起算，cap 封顶。 */
@@ -170,8 +177,10 @@ export class RemoteMuxTransport {
   private readonly streams = new Map<string, StreamInbox>();
   private readonly backoffBaseMs: number;
   private readonly backoffMaxMs: number;
-  private readonly cookie: (() => Promise<string>) | undefined;
+  /** 凭据来源。可变：换端口时 authority 变了，必须换新的 cookie 生产者（见 rebindBaseUrl）。 */
+  private cookie: (() => Promise<string>) | undefined;
   private readonly onState: ((state: MuxState) => void) | undefined;
+  private readonly onRefused: (() => void) | undefined;
   private focusCleanup: (() => void) | null = null;
   /** 最近一次连接失败是否为 ECONNREFUSED（服务未启动）：决定退避策略。 */
   private lastRefused = false;
@@ -187,6 +196,7 @@ export class RemoteMuxTransport {
     // 本地 DSH 启动约 10~30 秒，期间会失败数次推高 attempt；8s 封顶保证服务就绪后最坏 8 秒内恢复。
     this.backoffMaxMs = options.backoffMaxMs ?? 8000;
     this.onState = options.onState;
+    this.onRefused = options.onRefused;
     const auth = options.auth;
     if (options.cookieHeader) this.cookie = options.cookieHeader;
     else if (auth) this.cookie = () => auth.cookieHeader();
@@ -204,6 +214,51 @@ export class RemoteMuxTransport {
    */
   get serviceDown(): boolean {
     return this.refusedSinceOpen;
+  }
+
+  /**
+   * 原地切换到另一个入口（DSH 桌面端每次启动换随机端口，这是常态）。
+   *
+   * 为什么不重建 transport 实例：`manager`/`approvals`/`globalStreams` 全都持有本实例，
+   * 换实例等于把整条 runtime 依赖重挂一遍。这里只换地址，对象身份保持不变。
+   *
+   * 必须同时做的三件事（少一件都会出问题）：
+   * 1. `generation++` + 关旧 socket —— 否则旧地址在途的帧会串进新连接
+   *    （`receive()` 靠 `this.socket !== socket` 守卫，换地址后旧 socket 就"合法"了）。
+   * 2. 复位 `attempt`/`lastRefused` —— 否则新地址首连会沿用旧地址推高的退避档位。
+   * 3. 复位 `refusedSinceOpen` —— 否则状态栏会一直显示「DSH 未运行」，
+   *    而用户明明刚把 DSH 起在另一个端口上。
+   *
+   * 不置 `stopped`：换地址后若此前处于活动状态（start() 过且未 stop()），
+   * 这里直接续上连接——调用方不该被要求"记得再调一次 start()"，
+   * 漏调就会静默停在 reconnecting，正是本函数要消灭的那类故障。
+   */
+  rebindBaseUrl(baseUrl: string, cookieHeader?: () => Promise<string>): void {
+    const wasActive = !this.stopped;
+    this.baseUrl = baseUrl;
+    // 凭据来源必须一起换：cookie 名 = `dsh-auth-<sha256(authority)>`，authority 含端口，
+    // 只换地址会继续用旧 authority 签的 cookie → 新地址 401（现场表现是"端口换对了还是连不上"）。
+    // 注意不能依赖构造期 `() => auth.cookieHeader()` 那个闭包：它捕获的是**旧 auth 对象**，
+    // 换端口后旧 auth 的 authority 已经错了。
+    if (cookieHeader) this.cookie = cookieHeader;
+    this.generation++; // 在途连接与帧全部失效
+    const socket = this.socket;
+    this.socket = null;
+    this.pendingConnect = null;
+    this.pendingToken = null;
+    this.attempt = 0;
+    this.lastRefused = false;
+    this.refusedSinceOpen = false;
+    if (this.reconnectTimer) {
+      clearTimer(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    try {
+      socket?.close(1000, "rebind");
+    } catch {
+      // 关旧连接是尽力而为：失败也不该阻断换地址
+    }
+    if (wasActive) this.start();
   }
 
   /** 物理 WS 地址：baseUrl http(s)→ws(s) + /api/remote.mux。 */
@@ -400,6 +455,12 @@ export class RemoteMuxTransport {
             // 否则「DSH 未运行（连接被拒绝）」永远显示不出来——真机复现：杀入口 35 秒后状态栏仍停在
             // 「重连中…」，而用户需要的是「未运行」这条可执行结论。
             if (firstRefusalSinceOpen) this.notifyState();
+            // 但**每次**被拒都必须让消费方知道：`emitState` 对同值去重，所以
+            // onState("reconnecting") 只会在状态翻转时到达一次。如果只在首次拒绝时通知，
+            // 依赖「连续失败次数」的上层逻辑（main.ts 的换端口自愈）永远只收到 1 次，
+            // 阈值 3 就永远达不到 —— 真机表现：杀掉旧端口后状态栏正确显示「未运行」，
+            // 但插件不会去发现新端口，用户仍须重载 Obsidian。
+            this.onRefused?.();
           }
         });
       })();

@@ -160,6 +160,7 @@ export class DshClient {
         auth: opts.auth,
         cookieHeader: opts.cookieHeader,
         onState: opts.transportOptions?.onState,
+        onRefused: opts.transportOptions?.onRefused,
         backoffBaseMs: opts.transportOptions?.backoffBaseMs,
         backoffMaxMs: opts.transportOptions?.backoffMaxMs,
       });
@@ -171,6 +172,36 @@ export class DshClient {
   /** 流物理层实例（批 4 main.ts 用 start()/stop()/state 接管生命周期）。 */
   get mux(): RemoteMuxTransport {
     return this.stream as RemoteMuxTransport;
+  }
+
+  /** 当前入口地址（诊断/测试用；改它请走 rebindBaseUrl）。 */
+  get baseUrlForTest(): string {
+    return this.opts.baseUrl;
+  }
+
+  /**
+   * 原地切换到另一个 DSH 入口（DSH 桌面端每次启动换随机端口，换端口是常态）。
+   *
+   * **必须同时换 auth**：cookie 名是 `dsh-auth-<sha256(authority)>`，authority 含端口，
+   * 只换 mux 地址会让新地址收到旧 authority 签的 cookie，服务端一律 401——
+   * 现场表现是"端口明明换对了还是连不上"，比不换更难排查。
+   * 故这里要求调用方一并给出新 auth（或 cookieHeader）。
+   *
+   * 保持实例身份不变：`manager`/`approvals`/`globalStreams` 都持有本 client，
+   * 换实例等于重挂整条 runtime 依赖。
+   */
+  rebindBaseUrl(baseUrl: string, auth?: DshClientOptions["auth"] | (() => Promise<string>)): void {
+    this.opts = { ...this.opts, baseUrl };
+    if (typeof auth === "function") {
+      this.opts.cookieHeader = auth;
+      delete this.opts.auth;
+    } else if (auth !== undefined) {
+      this.opts.auth = auth;
+      delete this.opts.cookieHeader;
+    }
+    // 用闭包而不是传 auth 对象：auth 在 rebind 时被替换，闭包保证永远解析到**当前** opts，
+    // 不会像 mux 构造期 `() => auth.cookieHeader()` 那样捕获旧 authority。
+    this.stream?.rebindBaseUrl(baseUrl, async () => String((await this.authHeader()).cookie ?? ""));
   }
 
   private async authHeader(): Promise<PostJsonHeaders> {
